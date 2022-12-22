@@ -355,7 +355,9 @@ class GPTNeox(nn.Module):
                 temperature=None,
                 len_penalty=None,
                 repetition_penalty=None,
-                random_seed=None):
+                random_seed=None,
+                request_id=None,
+                stream_tokens_pipe=None):
         if not self.build_model:
             self.cuda()
         input_len = start_ids.size(1)
@@ -376,7 +378,9 @@ class GPTNeox(nn.Module):
                                      temperature,  # optional, can be None
                                      len_penalty,  # optional, can be None
                                      repetition_penalty,  # optional, can be None
-                                     random_seed)  # optional, can be None
+                                     random_seed,  # optional, can be None
+                                     request_id,  # optional, can be None
+                                     stream_tokens_pipe)  # optional, can be None
         if dist.get_rank()==0:
             print(f"<GPTNeox>:forward: {outputs}")        
         output_ids, output_lengths, output_cum_log_probs = outputs

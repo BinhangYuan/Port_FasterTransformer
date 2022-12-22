@@ -99,7 +99,9 @@ std::vector<th::Tensor> GptNeoXOp::forward(th::Tensor               input_ids,
                                            th::optional<th::Tensor> temperature_opt,
                                            th::optional<th::Tensor> len_penalty_opt,
                                            th::optional<th::Tensor> repetition_penalty_opt,
-                                           th::optional<th::Tensor> random_seed_opt)
+                                           th::optional<th::Tensor> random_seed_opt,
+                                           th::optional<int64_t>    request_id,
+                                           th::optional<int64_t>    stream_tokens_pipe)
 {
    CHECK_TH_CUDA(input_ids);
    CHECK_CONTIGUOUS(input_ids);
@@ -134,7 +136,9 @@ std::vector<th::Tensor> GptNeoXOp::forward(th::Tensor               input_ids,
                    temperature_opt,
                    len_penalty_opt,
                    repetition_penalty_opt,
-                   random_seed_opt);
+                   random_seed_opt,
+                   request_id,
+                   stream_tokens_pipe);
    return std::vector<th::Tensor>{output_ids, sequence_lengths, cum_log_probs};
 }
 

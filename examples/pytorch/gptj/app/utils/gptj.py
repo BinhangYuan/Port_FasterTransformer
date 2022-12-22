@@ -312,7 +312,9 @@ class GPTJ(nn.Module):
                 temperature=None,
                 len_penalty=None,
                 repetition_penalty=None,
-                random_seed=None):
+                random_seed=None,
+                request_id=None,
+                stream_tokens_pipe=None):
         input_len = start_ids.size(1)
         assert input_len > 0, "input len must be larger than zero. For an unconditional case, use start_id as the first token."
 
@@ -331,7 +333,9 @@ class GPTJ(nn.Module):
                                      temperature,  # optional, can be None
                                      len_penalty,  # optional, can be None
                                      repetition_penalty,  # optional, can be None
-                                     random_seed)  # optional, can be None
+                                     random_seed,  # optional, can be None
+                                     request_id,  # optional, can be None
+                                     stream_tokens_pipe)  # optional, can be None
         print(f"<GPTJ>:forward: {outputs}")        
         output_ids, output_lengths, output_cum_log_probs = outputs
         return output_ids

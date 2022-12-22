@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Dict
 import argparse
@@ -122,6 +123,7 @@ class FastOPTInference(FastInferenceInterface):
         self.task_info["stream_tokens"] = args.get("stream_tokens", False)
         self.task_info["return_cum_log_probs"] = args.get("return_cum_log_probs", 0)
         self.task_info["return_output_length"] = args.get("return_output_length", 0)
+        self.task_info["stream_tokens"] = args.get("stream_tokens", False)
         
         if len(self.task_info["prompt_seqs"][0]) == 0 or self.task_info["output_len"] == 0:
             inferenece_result = []
@@ -174,7 +176,9 @@ class FastOPTInference(FastInferenceInterface):
                                     self.task_info["repetition_penalty"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
                                     self.random_seed_tensor,
                                     self.task_info["return_output_length"],
-                                    self.task_info["return_cum_log_probs"])
+                                    self.task_info["return_cum_log_probs"],
+                                    self.served,
+                                    self.stream_tokens_pipe_w if self.task_info["stream_tokens"] else -1)
             # only a thread (rank 0) gets the output, while the others are supposed to return None.
             time_elapsed = timeit.default_timer() - time
         print("[INFO] OPT time costs: {:.2f} ms. <rank-{}>".format(time_elapsed * 1000, dist.get_rank()))
@@ -218,7 +222,6 @@ class FastOPTInference(FastInferenceInterface):
         
 
 if __name__ == "__main__":
-    
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument('--together_model_name', type=str, default='Together-opt-175b',
@@ -233,11 +236,11 @@ if __name__ == "__main__":
                         help='tensor parallel size')
     parser.add_argument('--group_name', type=str, default='group1',
                         help='group name for together coordinator.')
-    
+
     args = parser.parse_args()
-    
+
     coord_url = os.environ.get("COORD_URL", "127.0.0.1")
-    
+
     coordinator = TogetherWeb3(
         TogetherClientOptions(reconnect=True),
         http_url=f"http://{coord_url}:8092",
@@ -249,7 +252,7 @@ if __name__ == "__main__":
         "group_name": args.group_name,
         "ckpt_path": args.ckpt_path,
         "tensor_para_size":args.tensor_para_size,
-        "stream_tokens_pipe": False,
+        "stream_tokens_pipe": True,
         "max_batch_size":1
     })
     fip.start()

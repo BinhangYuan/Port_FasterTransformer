@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import torch
@@ -84,6 +85,7 @@ class FastGPTNeoxInference(FastInferenceInterface):
         self.task_info["len_penalty"] = get_float(args.get("len_penalty", 0.0), default=0.0)
         self.task_info["repetition_penalty"] = get_float(args.get("repetition_penalty", 1.0), default=1.0)
         self.task_info["stop"] =  args.get("stop", [])
+        self.task_info["stream_tokens"] = args.get("stream_tokens", False)
         # self.task_info["return_cum_log_probs"] = args.get("return_cum_log_probs", 0)
         # self.task_info["return_output_length"] = args.get("return_output_length", 0)
         if len(self.task_info["prompt_seqs"][0]) == 0 or self.task_info["output_len"] == 0:
@@ -136,7 +138,9 @@ class FastGPTNeoxInference(FastInferenceInterface):
                                     self.task_info["temperature"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
                                     self.task_info["len_penalty"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
                                     self.task_info["repetition_penalty"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
-                                    self.random_seed_tensor)
+                                    self.random_seed_tensor,
+                                    self.served,
+                                    self.stream_tokens_pipe_w if self.task_info["stream_tokens"] else -1)
             # only a thread (rank 0) gets the output, while the others are supposed to return None.
             time_elapsed = timeit.default_timer() - time
         print(f"[INFO] GPTNeox time costs: {time_elapsed} ms. ")
@@ -174,6 +178,7 @@ class FastGPTNeoxInference(FastInferenceInterface):
         
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument('--together_model_name', type=str, default='Together-gpt-neox-20b-tp1',
                         help='worker name for together coordinator.')
@@ -202,6 +207,7 @@ if __name__ == "__main__":
         "worker_name": args.worker_name,
         "group_name": args.group_name,
         "tensor_para_size":1,
-        "max_batch_size":1
+        "max_batch_size":1,
+        "stream_tokens_pipe": True,
     })
     fip.start()

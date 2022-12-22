@@ -4,6 +4,7 @@
 #include "src/fastertransformer/th_op/th_utils.h"
 #include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
 #include "src/fastertransformer/utils/nccl_utils.h"
+#include "src/fastertransformer/utils/stream_tokens_pipe.h"
 
 
 namespace ft = fastertransformer;
@@ -28,7 +29,9 @@ public:
                         th::optional<th::Tensor> temperature_opt,
                         th::optional<th::Tensor> len_penalty_opt,
                         th::optional<th::Tensor> repetition_penalty_opt,
-                        th::optional<th::Tensor> random_seed_opt) = 0;
+                        th::optional<th::Tensor> random_seed_opt,
+                        th::optional<int64_t>    request_id,
+                        th::optional<int64_t>    stream_tokens_pipe) = 0;
 };
 
 template<typename T>
@@ -178,7 +181,9 @@ public:
                 th::optional<th::Tensor> temperature_opt,
                 th::optional<th::Tensor> len_penalty_opt,
                 th::optional<th::Tensor> repetition_penalty_opt,
-                th::optional<th::Tensor> random_seed_opt) override
+                th::optional<th::Tensor> random_seed_opt,
+                th::optional<int64_t>    request_id,
+                th::optional<int64_t>    stream_tokens_pipe) override
    {
 #ifdef _DEBUG_PRINT_GPTJ
         std::cout << "IFGptj-forward: starts." << std::endl;
@@ -287,6 +292,15 @@ public:
                 convert_tensor<unsigned long long int>(random_seed_opt.value(), ft::MemoryType::MEMORY_CPU)});
        }
 
+       int pipe_fd = stream_tokens_pipe.has_value() ? stream_tokens_pipe.value() : -1;
+       if (pipe_fd >= 0) {
+           this->stream_tokens_pipe_.reset(
+               new ft::TokenPipe(pipe_fd, request_id.has_value() ? request_id.value() : 0));
+           gptj.registerCallback(&ft::TokenPipe::stream_tokens_callback, this->stream_tokens_pipe_.get());
+       } else {
+           this->stream_tokens_pipe_.reset(nullptr);
+       }
+
        std::unordered_map<std::string, ft::Tensor> output_tensors = std::unordered_map<std::string, ft::Tensor>{
            {"output_ids",
             ft::Tensor{ft::MEMORY_GPU,
@@ -347,6 +361,8 @@ private:
    int                      world_size_ = 1;
    int                      rank_       = 0;
 
+   std::unique_ptr<ft::TokenPipe> stream_tokens_pipe_;
+
 
     bool isValidLayerParallelIndex(int l)
     {
@@ -381,7 +397,9 @@ public:
                               th::optional<th::Tensor> temperature_opt,
                               th::optional<th::Tensor> len_penalty_opt,
                               th::optional<th::Tensor> repetition_penalty_opt,
-                              th::optional<th::Tensor> random_seed_opt);
+                              th::optional<th::Tensor> random_seed_opt,
+                              th::optional<int64_t>    request_id,
+                              th::optional<int64_t>    stream_tokens_pipe);
 
 private:
    const at::ScalarType    st_;

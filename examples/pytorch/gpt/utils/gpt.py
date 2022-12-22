@@ -419,7 +419,9 @@ class GPT(nn.Module):
                 repetition_penalty=None,
                 random_seed=None,
                 return_output_length=False,
-                return_cum_log_probs=0):
+                return_cum_log_probs=0,
+                request_id=None,
+                stream_tokens_pipe=None):
         if not self.build_model:
             self.cuda()
         input_len = start_ids.size(1)
@@ -440,7 +442,9 @@ class GPT(nn.Module):
                                      len_penalty, # optional, can be None
                                      repetition_penalty, # optional, can be None
                                      random_seed, # optional, can be None
-                                     return_cum_log_probs) # optional, can be None
+                                     return_cum_log_probs, # optional, can be None
+                                     request_id,  # optional, can be None
+                                     stream_tokens_pipe)  # optional, can be None
         if return_cum_log_probs == 0:
             output_ids, output_lengths = outputs
         else:
