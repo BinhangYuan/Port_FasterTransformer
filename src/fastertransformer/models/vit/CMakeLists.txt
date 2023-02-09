@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,9 @@ set_property(TARGET ViT PROPERTY POSITION_INDEPENDENT_CODE  ON)
 set_property(TARGET ViT PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS  ON)
 target_link_libraries(ViT PUBLIC -lcudart -lcublasLt -lcublas cublasMMWrapper 
                       UnfusedAttentionLayer FusedAttentionLayer FfnLayer layernorm_kernels
-                      add_residual_kernels activation_kernels vit_kernels bert_preprocess_kernels tensor)
+                      add_residual_kernels activation_kernels vit_kernels bert_preprocess_kernels
+                      tensor cuda_utils logger)
 
 add_executable(vit_gemm vit_gemm.cc)
-target_link_libraries(vit_gemm PUBLIC -lcublas -lcublasLt -lcudart encoder_gemm_func encoder_igemm_func memory_utils tensor)
+target_link_libraries(vit_gemm PUBLIC -lcublas -lcublasLt -lcudart encoder_gemm_func encoder_igemm_func
+                      memory_utils tensor cuda_utils logger)

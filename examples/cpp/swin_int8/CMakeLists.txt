@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,4 +15,4 @@ cmake_minimum_required(VERSION 3.8)
 
 add_executable(swin_int8_example swin_int8_example.cc)
 target_link_libraries(swin_int8_example PUBLIC trt_fused_multi_head_attention SwinINT8 cublasAlgoMap 
-    cublasINT8MMWrapper quantize_weight memory_utils -lcublasLt -lcublas -lcudart -lcudnn)
+  cublasINT8MMWrapper quantize_weight memory_utils -lcublasLt -lcublas -lcudart "${CUDNN_LIBRARY_PATH}")

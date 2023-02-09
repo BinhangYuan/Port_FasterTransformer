@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -138,6 +138,12 @@ public:
     void forward(std::vector<Tensor>*       output_tensors,
                  const std::vector<Tensor>* input_tensors,
                  const DecodingWeight<T>*   Decoding_weights);
+
+    void forward(std::unordered_map<std::string, Tensor>*       output_tensors,
+                 const std::unordered_map<std::string, Tensor>* input_tensors,
+                 const DecodingWeight<T>*                       Decoding_weights);
+
+    void forward(TensorMap* output_tensors, TensorMap* input_tensors, const DecodingWeight<T>* Decoding_weights);
 };
 
 }  // namespace fastertransformer

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,6 +60,8 @@ T5TritonModel<T>::T5TritonModel(INIReader reader, std::string model_dir): model_
     encoder_vocab_size_    = reader.GetInteger("encoder", "vocab_size");
     encoder_num_bucket_or_max_pos_seq_len_ =
         reader.GetInteger("encoder", "relative_attention_num_buckets_or_max_pos_seq_len");
+    encoder_adapter_.interSize(reader.GetInteger("encoder", "adapter_inter_size", 0));
+    encoder_adapter_.layerNormType(reader.Get("encoder", "adapter_norm_position", "pre"));
 
     // decoding
     decoding_head_num_      = reader.GetInteger("decoder", "num_heads");
@@ -70,6 +72,9 @@ T5TritonModel<T>::T5TritonModel(INIReader reader, std::string model_dir): model_
     decoding_vocab_size_    = reader.GetInteger("decoder", "vocab_size");
     decoding_num_bucket_or_max_pos_seq_len_ =
         reader.GetInteger("decoder", "relative_attention_num_buckets_or_max_pos_seq_len");
+    decoding_adapter_.interSize(reader.GetInteger("decoder", "adapter_inter_size", 0));
+    decoding_adapter_.layerNormType(reader.Get("decoder", "adapter_norm_position", "pre"));
+
     start_id_                 = reader.GetInteger("decoder", "decoder_start_token_id");
     end_id_                   = reader.GetInteger("decoder", "eos_token_id");
     tensor_para_size_         = reader.GetInteger("ft_instance_hyperparameter", "tensor_para_size");
@@ -116,6 +121,21 @@ T5TritonModel<T>::T5TritonModel(size_t      tensor_para_size,
     encoder_vocab_size_    = reader.GetInteger("encoder", "vocab_size");
     encoder_num_bucket_or_max_pos_seq_len_ =
         reader.GetInteger("encoder", "relative_attention_num_buckets_or_max_pos_seq_len");
+    encoder_adapter_.interSize(reader.GetInteger("encoder", "adapter_inter_size", 0));
+    encoder_adapter_.layerNormType(reader.Get("encoder", "adapter_norm_position", "pre"));
+
+    // encoder prompt
+    num_tasks_                = reader.GetInteger("encoder", "num_tasks", 0);
+    prompt_learning_start_id_ = reader.GetInteger("encoder", "prompt_learning_start_id", encoder_vocab_size_ + 1);
+    prompt_learning_type_ =
+        static_cast<ft::PromptLearningType>(reader.GetInteger("encoder", "prompt_learning_type", 0));
+
+    for (int task_name_id = 0; task_name_id < num_tasks_; task_name_id++) {
+        std::string config_task_name = "task_" + std::to_string(task_name_id);
+        std::string task_name        = reader.Get(config_task_name, "task_name");
+        const int   prompt_length    = reader.GetInteger(config_task_name, "prompt_length", 0);
+        prompt_learning_table_pair_.insert({task_name, {task_name_id, prompt_length}});
+    }
 
     // decoding
     decoding_head_num_      = reader.GetInteger("decoder", "num_heads");
@@ -126,16 +146,22 @@ T5TritonModel<T>::T5TritonModel(size_t      tensor_para_size,
     decoding_vocab_size_    = reader.GetInteger("decoder", "vocab_size");
     decoding_num_bucket_or_max_pos_seq_len_ =
         reader.GetInteger("decoder", "relative_attention_num_buckets_or_max_pos_seq_len");
+    decoding_adapter_.interSize(reader.GetInteger("decoder", "adapter_inter_size", 0));
+    decoding_adapter_.layerNormType(reader.Get("decoder", "adapter_norm_position", "pre"));
+
     start_id_            = reader.GetInteger("decoder", "decoder_start_token_id");
     end_id_              = reader.GetInteger("decoder", "eos_token_id");
     tie_word_embeddings_ = reader.GetBoolean("decoder", "tie_word_embeddings", true);
 
+    // common settings
     t5_with_bias_         = reader.GetBoolean("structure", "t5_with_bias", false);
     use_gated_activation_ = reader.GetBoolean("structure", "use_gated_activation", false);
     activation_type_      = ft::getActivationType(reader.Get("encoder", "feed_forward_proj"));
     position_embedding_type_ =
         ft::PositionEmbeddingType(reader.Get("structure", "position_embedding_type", "relative") == "relative" ? 0 : 1);
     q_scaling_ = t5_with_bias_ ? 1.0f : (1.0f / (sqrt(encoder_size_per_head_) * 1.0f));
+
+    ia3_num_tasks_ = reader.GetInteger("structure", "ia3_num_tasks", 0);
 
     max_distance_ = 128;  // use default value of huggingface here
 }
@@ -186,6 +212,7 @@ T5TritonModel<T>::createModelInstance(int                                       
     const int sm_ = ft::getSMVersion();
 
     // TODO(bhsueh) not support fused mha
+    // NOTE: fmha doesn't support t5-style relative position bias
     ft::AttentionType attention_type =
         ft::getAttentionType<T>(encoder_size_per_head_, sm_, true, encoder_num_bucket_or_max_pos_seq_len_, false);
 
@@ -200,9 +227,12 @@ T5TritonModel<T>::createModelInstance(int                                       
                                                                        encoder_d_model_,
                                                                        encoder_num_layer_,
                                                                        encoder_num_bucket_or_max_pos_seq_len_,
+                                                                       0,  // expert_num
                                                                        max_distance_,
+                                                                       0,  // moe_k
                                                                        sm_,
                                                                        q_scaling_,
+                                                                       {},  // moe_layer_index
                                                                        stream,
                                                                        cublas_wrapper.get(),
                                                                        allocator.get(),
@@ -213,8 +243,11 @@ T5TritonModel<T>::createModelInstance(int                                       
                                                                        ft::LayerNormType::pre_layernorm,
                                                                        tensor_para_,
                                                                        pipeline_para_,
+                                                                       prompt_learning_start_id_,
+                                                                       prompt_learning_type_,
                                                                        custom_all_reduce_comm,
-                                                                       enable_custom_all_reduce_));
+                                                                       enable_custom_all_reduce_,
+                                                                       encoder_adapter_));
 
     auto decoding = std::make_unique<ft::T5Decoding<T>>(ft::T5Decoding<T>(0,
                                                                           0,
@@ -227,7 +260,9 @@ T5TritonModel<T>::createModelInstance(int                                       
                                                                           decoding_num_layer_,
                                                                           decoding_vocab_size_,
                                                                           decoding_num_bucket_or_max_pos_seq_len_,
+                                                                          0,  // expert_num
                                                                           max_distance_,
+                                                                          0,  // moe_k
                                                                           q_scaling_,
                                                                           start_id_,
                                                                           end_id_,
@@ -237,6 +272,7 @@ T5TritonModel<T>::createModelInstance(int                                       
                                                                           1.0f,  // temperature_,
                                                                           0.0f,  // len_penalty_,
                                                                           1.0f,  // repetition_penalty_,
+                                                                          {},    // moe_layer_index
                                                                           stream,
                                                                           cublas_wrapper.get(),
                                                                           allocator.get(),
@@ -247,7 +283,8 @@ T5TritonModel<T>::createModelInstance(int                                       
                                                                           activation_type_,
                                                                           tie_word_embeddings_,
                                                                           custom_all_reduce_comm,
-                                                                          enable_custom_all_reduce_));
+                                                                          enable_custom_all_reduce_,
+                                                                          decoding_adapter_));
 
     return std::unique_ptr<T5TritonModelInstance<T>>(new T5TritonModelInstance<T>(std::move(encoder),
                                                                                   std::move(decoding),
@@ -281,7 +318,11 @@ void T5TritonModel<T>::createSharedWeights(int device_id, int rank)
                                                  pipeline_para_rank,
                                                  t5_with_bias_,
                                                  use_gated_activation_,
-                                                 position_embedding_type_);
+                                                 position_embedding_type_,
+                                                 prompt_learning_type_,
+                                                 prompt_learning_table_pair_,
+                                                 ia3_num_tasks_,
+                                                 encoder_adapter_.interSize());
 
     decoding_shared_weights_[device_id] =
         std::make_shared<ft::T5DecodingWeight<T>>(decoding_head_num_,
@@ -298,11 +339,12 @@ void T5TritonModel<T>::createSharedWeights(int device_id, int rank)
                                                   pipeline_para_rank,
                                                   t5_with_bias_,
                                                   use_gated_activation_,
-                                                  position_embedding_type_);
+                                                  position_embedding_type_,
+                                                  ia3_num_tasks_,
+                                                  decoding_adapter_.interSize());
 
     encoder_shared_weights_[device_id]->loadModel(model_dir_);
     decoding_shared_weights_[device_id]->loadModel(model_dir_);
-    return;
 }
 
 template<typename T>
@@ -317,12 +359,14 @@ std::string T5TritonModel<T>::toString()
        << "\n    encoder_d_model_: " << encoder_d_model_ << "\n    encoder_inter_size_: " << encoder_inter_size_
        << "\n    encoder_num_layer_: " << encoder_num_layer_ << "\n    encoder_vocab_size_: " << encoder_vocab_size_
        << "\n    encoder_num_bucket_or_max_pos_seq_len_: " << encoder_num_bucket_or_max_pos_seq_len_
+       << "\n    encoder_adapter_: " << encoder_adapter_.toString()
        << "\n    decoding_head_num_: " << decoding_head_num_
        << "\n    decoding_size_per_head_: " << decoding_size_per_head_
        << "\n    decoding_d_model_: " << decoding_d_model_ << "\n    decoding_inter_size_: " << decoding_inter_size_
        << "\n    decoding_num_layer_: " << decoding_num_layer_ << "\n    decoding_vocab_size_: " << decoding_vocab_size_
        << "\n    decoding_num_bucket_or_max_pos_seq_len_: " << decoding_num_bucket_or_max_pos_seq_len_
-       << "\n    t5_with_bias_: " << t5_with_bias_ << "\n    use_gated_activation_: " << use_gated_activation_
+       << "\n    decoding_adapter: " << decoding_adapter_.toString() << "\n    t5_with_bias_: " << t5_with_bias_
+       << "\n    use_gated_activation_: " << use_gated_activation_
        << "\n   position_embedding_type_: " << position_embedding_type_string << "\n    start_id_: " << start_id_
        << "\n    end_id_: " << end_id_ << "\n    model_name_: " << model_name_ << "\n    model_dir_: " << model_dir_
        << std::endl;

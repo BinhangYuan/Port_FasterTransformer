@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2022-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,8 +38,8 @@ BertTritonModel<T>::BertTritonModel(size_t      tensor_para_size,
     is_sparse_(is_sparse),
     is_remove_padding_(is_remove_padding)
 {
-    ft::FT_CHECK_WITH_INFO(int8_mode_ == 0, "still not support int8 in bert backend");
-    ft::FT_CHECK_WITH_INFO(is_sparse == false, "still not support sparse in bert backend");
+    FT_CHECK_WITH_INFO(int8_mode_ == 0, "still not support int8 in bert backend");
+    FT_CHECK_WITH_INFO(is_sparse == false, "still not support sparse in bert backend");
 
     INIReader reader = INIReader(model_dir + "/config.ini");
     if (reader.ParseError() < 0) {

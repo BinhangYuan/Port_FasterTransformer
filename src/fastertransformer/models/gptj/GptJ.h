@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,8 +52,12 @@ private:
     std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm_;
     int                                 enable_custom_all_reduce_;
 
+    AttentionType attention_type_;
+
     size_t     vocab_size_padded_;
-    const bool is_context_qk_buf_float_ = true;
+    const bool is_context_qk_buf_float_ =
+        (std::getenv("CONTEXT_ATTENTION_BMM1_HALF_ACCUM") == nullptr ||
+         std::string(std::getenv("CONTEXT_ATTENTION_BMM1_HALF_ACCUM")) != "ON");
 
     // Prompt Learning Parameters
     PromptLearningType prompt_learning_type_;
@@ -124,7 +128,8 @@ protected:
 
     void setOutputTensors(std::unordered_map<std::string, Tensor>*       output_tensors,
                           const std::unordered_map<std::string, Tensor>* input_tensors,
-                          size_t                                         max_seq_len);
+                          const size_t                                   max_input_length,
+                          const size_t                                   max_seq_len);
     void sendTensorsToFirstPipelineNode(std::unordered_map<std::string, Tensor>*       output_tensors,
                                         const std::unordered_map<std::string, Tensor>* input_tensors);
 
@@ -154,7 +159,8 @@ public:
          cublasMMWrapper*                    cublas_wrapper,
          IAllocator*                         allocator,
          bool                                is_free_buffer_after_forward,
-         cudaDeviceProp*                     cuda_device_prop,
+         cudaDeviceProp*                     cuda_device_prop         = nullptr,
+         AttentionType                       attention_type           = AttentionType::UNFUSED_MHA,
          std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm   = nullptr,
          int                                 enable_custom_all_reduce = 0);
 
@@ -186,6 +192,7 @@ public:
          IAllocator*                         allocator,
          bool                                is_free_buffer_after_forward,
          cudaDeviceProp*                     cuda_device_prop         = nullptr,
+         AttentionType                       attention_type           = AttentionType::UNFUSED_MHA,
          std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm   = nullptr,
          int                                 enable_custom_all_reduce = 0);
 

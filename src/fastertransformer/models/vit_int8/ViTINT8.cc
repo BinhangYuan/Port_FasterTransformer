@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ void ViTTransformerINT8<T>::initialize()
     }
 
     max_seq_len_ = request_seq_len_;
-    if ((attention_type_ == AttentionType::FUSED_MHA) && std::is_same<T, half>::value == true && head_dim_ <= 384) {
+    if ((attention_type_ == AttentionType::FUSED_MHA) && std::is_same<T, half>::value == true) {
         attention_layer_ = new FusedAttentionLayerINT8<T>(max_batch_size_,
                                                           max_seq_len_,
                                                           head_num_,
@@ -186,7 +186,7 @@ void ViTTransformerINT8<T>::allocateBuffer()
             (T*)allocator_->reMalloc(mask_buf_, sizeof(T) * max_batch_size_ * max_seq_len_ * max_seq_len_, false);
         padding_offset_ =
             (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * max_batch_size_ * max_seq_len_, false);
-        token_num_ = (size_t*)allocator_->reMalloc(token_num_, sizeof(size_t) * 1, false);
+        h_pinned_token_num_ptr_ = (size_t*)allocator_->reMalloc(h_pinned_token_num_ptr_, sizeof(size_t), true, true);
 
         trt_mha_padding_offset_ =
             (int*)allocator_->reMalloc(trt_mha_padding_offset_, sizeof(int) * (2 * max_batch_size_ + 1), false);
@@ -222,7 +222,7 @@ void ViTTransformerINT8<T>::allocateBuffer(size_t batch_size)
     embed_buf_4_ = (T*)allocator_->reMalloc(embed_buf_4_, sizeof(T) * batch_size * max_seq_len_ * embed_dim_, false);
     mask_buf_    = (T*)allocator_->reMalloc(mask_buf_, sizeof(T) * batch_size * max_seq_len_ * max_seq_len_, false);
     REMALLOC(padding_offset_, sizeof(int) * batch_size * max_seq_len_);
-    REMALLOC(token_num_, sizeof(size_t) * 1);
+    h_pinned_token_num_ptr_ = (size_t*)allocator_->reMalloc(h_pinned_token_num_ptr_, sizeof(size_t), true, true);
     trt_mha_padding_offset_ =
         (int*)allocator_->reMalloc(trt_mha_padding_offset_, sizeof(int) * (2 * batch_size + 1), false);
     seq_len_vec_ = (int*)allocator_->reMalloc(seq_len_vec_, sizeof(int) * batch_size, false);
@@ -238,17 +238,19 @@ void ViTTransformerINT8<T>::allocateBuffer(size_t batch_size)
 template<typename T>
 void ViTTransformerINT8<T>::freeBuffer()
 {
-    allocator_->free((void**)(&embed_buf_1_));
-    allocator_->free((void**)(&embed_buf_2_));
-    allocator_->free((void**)(&embed_buf_3_));
-    allocator_->free((void**)(&embed_buf_4_));
-    allocator_->free((void**)(&mask_buf_));
-    allocator_->free((void**)(&trt_mha_padding_offset_));
-    allocator_->free((void**)(&seq_len_vec_));
-    allocator_->free((void**)(&padding_offset_));
-    allocator_->free((void**)(&token_num_));
+    if (is_allocate_buffer_) {
+        allocator_->free((void**)(&embed_buf_1_));
+        allocator_->free((void**)(&embed_buf_2_));
+        allocator_->free((void**)(&embed_buf_3_));
+        allocator_->free((void**)(&embed_buf_4_));
+        allocator_->free((void**)(&mask_buf_));
+        allocator_->free((void**)(&trt_mha_padding_offset_));
+        allocator_->free((void**)(&seq_len_vec_));
+        allocator_->free((void**)(&padding_offset_));
+        allocator_->free((void**)(&h_pinned_token_num_ptr_), true);
 
-    is_allocate_buffer_ = false;
+        is_allocate_buffer_ = false;
+    }
 }
 
 template<typename T>
@@ -277,8 +279,8 @@ void ViTTransformerINT8<T>::forward(std::vector<Tensor>*       output_tensors,
     FT_CHECK(output_tensors->at(0).shape.size() == 3);
     allocateBuffer(input_batch_size);
 
-    const T* input             = (const T*)input_tensors->at(0).data;
-    T*       output            = (T*)output_tensors->at(0).data;
+    const T* input             = input_tensors->at(0).getPtr<const T>();
+    T*       output            = output_tensors->at(0).getPtr<T>();
     T*       encoder_input_ptr = embed_buf_1_;
 
     // preprocess (patches embedding, concat class embed and add pos embed)
@@ -336,18 +338,22 @@ void ViTTransformerINT8<T>::forward(std::vector<Tensor>*       output_tensors,
         // Attention
         {
 
-            std::vector<Tensor> attn_input_tensors{
-                Tensor{MEMORY_GPU, TYPE_INT8, std::vector<size_t>{h_token_num, embed_dim_}, norm_out_buf},
-                Tensor{MEMORY_GPU, data_type, std::vector<size_t>{input_batch_size, 1, seq_len, seq_len}, mask_buf_},
-                *offset_tensor_ptr};
-            std::vector<Tensor> attn_output_tensors{
-                Tensor{MEMORY_GPU, TYPE_INT8, std::vector<size_t>{h_token_num, embed_dim_}, attn_out_buf}};
+            TensorMap attn_input_tensors{
+                {"input_query",
+                 Tensor{MEMORY_GPU, TYPE_INT8, std::vector<size_t>{h_token_num, embed_dim_}, norm_out_buf}},
+                {"attention_mask",
+                 Tensor{MEMORY_GPU, data_type, std::vector<size_t>{input_batch_size, 1, seq_len, seq_len}, mask_buf_}},
+            };
+            attn_input_tensors.insertIfValid("padding_offset", *offset_tensor_ptr);
+            TensorMap attn_output_tensors{
+                {"hidden_features",
+                 Tensor{MEMORY_GPU, TYPE_INT8, std::vector<size_t>{h_token_num, embed_dim_}, attn_out_buf}}};
             attention_layer_->forward(
                 &attn_output_tensors, &attn_input_tensors, &weights->vit_layer_weights[i].attention_weights);
         }
 
         if (int8_mode_ == 1) {
-            invokeAddBiasResidualLayerNormCol32_noRes(
+            invokeAddBiasResidualPreLayerNormCol32(
                 (int8_t*)norm_out_buf,
                 (int32_t*)attn_out_buf,
                 from_buf,
@@ -362,18 +368,18 @@ void ViTTransformerINT8<T>::forward(std::vector<Tensor>*       output_tensors,
                 &(scalePtr->d_scale_list_[44 + 3]));
         }
         else if (int8_mode_ == 2) {
-            invokeAddBiasResidualLayerNormCol32_noRes(
+            invokeAddBiasResidualPreLayerNormCol32(
                 (int8_t*)norm_out_buf,
                 (int8_t*)attn_out_buf,
-                from_buf,
-                weights->vit_layer_weights[i].attention_weights.attention_output_weight.bias,
-                weights->vit_layer_weights[i].ffn_layernorm_weights.gamma,
-                weights->vit_layer_weights[i].ffn_layernorm_weights.beta,
+                (__half*)from_buf,
+                (const __half*)weights->vit_layer_weights[i].attention_weights.attention_output_weight.bias,
+                (const __half*)weights->vit_layer_weights[i].ffn_layernorm_weights.gamma,
+                (const __half*)weights->vit_layer_weights[i].ffn_layernorm_weights.beta,
                 h_token_num,
                 embed_dim_,
                 stream_,
-                &(scalePtr->d_scale_list_[40 + 1]),
-                &(scalePtr->d_scale_list_[44 + 3]));
+                (scalePtr->h_scale_list_[40 + 1]),
+                (scalePtr->h_scale_list_[44 + 3]));
         }
 
         // FFN
@@ -421,6 +427,8 @@ void ViTTransformerINT8<T>::forward(std::vector<Tensor>*       output_tensors,
                            layernorm_eps_,
                            h_token_num,
                            embed_dim_,
+                           (float*)nullptr,
+                           0,
                            stream_);
 
     if (need_padding) {
@@ -477,7 +485,7 @@ template<typename T>
 void ViTTransformerINT8<T>::setDefaultPaddingOffset(size_t batch_size)
 {
     invokeGetPaddingOffset(
-        &nopad_token_num_, token_num_, padding_offset_, seq_len_vec_, batch_size, max_seq_len_, stream_);
+        h_pinned_token_num_ptr_, &nopad_token_num_, padding_offset_, seq_len_vec_, batch_size, max_seq_len_, stream_);
 }
 
 template<typename T>

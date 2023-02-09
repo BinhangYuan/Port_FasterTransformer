@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ void invokeApplyTemperaturePenalty(T*           logits,
 {
     dim3    block(min(vocab_size_padd, 1024));
     dim3    grid(min(batch_size * vocab_size_padd / block.x, 65536));
-    const T temperature_inverse = (T)(1.f / (float)temperature);
+    const T temperature_inverse = (T)(1.f / (temperature + 1e-6f));
     if (std::is_same<T, half>::value && vocab_size % 2 == 0 && vocab_size_padd % 2 == 0) {
         applyTemperaturePenalty<<<grid, block, 0, stream>>>(reinterpret_cast<half2*>(logits),
                                                             reinterpret_cast<const half2*>(bias),
@@ -127,7 +127,7 @@ __global__ void batchApplyTemperaturePenalty(T*           logits,
     const T                 MAX_T_VAL = (IS_FP16) ? 65504.F : FLT_MAX;
     extern __shared__ float inv_temperatures[];
     if (threadIdx.x < batch_size) {
-        inv_temperatures[threadIdx.x] = 1 / temperatures[threadIdx.x];
+        inv_temperatures[threadIdx.x] = 1.0f / (temperatures[threadIdx.x] + 1e-6f);
     }
     __syncthreads();
 
@@ -157,7 +157,7 @@ __global__ void batchApplyTemperaturePenalty_h2(half2*       logits,
     assert(vocab_size_padded % 2 == 0);
     extern __shared__ half2 h2_inv_temperatures[];
     if (threadIdx.x < batch_size) {
-        h2_inv_temperatures[threadIdx.x] = __float2half2_rn(1 / temperatures[threadIdx.x]);
+        h2_inv_temperatures[threadIdx.x] = __float2half2_rn(1.f / (temperatures[threadIdx.x] + 1e-6f));
     }
     __syncthreads();
 
@@ -221,7 +221,7 @@ template void invokeBatchApplyTemperaturePenalty(half*        logits,
                                                  const int    vocab_size_padd,
                                                  cudaStream_t stream);
 
-template<typename T>
+template<typename T, RepetitionPenaltyType penalty_type>
 __global__ void applyRepetitionPenalty(T*          logits,
                                        const float penalty,
                                        const int*  start_ids,
@@ -252,7 +252,19 @@ __global__ void applyRepetitionPenalty(T*          logits,
         }
         penalty_indices[index] = penalty_index;
         float logit            = (float)logits[penalty_index];
-        penalty_logits[index]  = logit < 0.0f ? logit * penalty : logit / penalty;
+        if (penalty_type == RepetitionPenaltyType::Additive) {
+            penalty_logits[index] = logit - penalty;
+        }
+        else if (penalty_type == RepetitionPenaltyType::Multiplicative) {
+            penalty_logits[index] = logit < 0.0f ? logit * penalty : logit / penalty;
+        }
+        else if (penalty_type == RepetitionPenaltyType::None) {
+            penalty_logits[index] = logit;
+        }
+        else {
+            // Unsupported type
+            assert(false);
+        }
     }
 
     if (blockDim.x > 32) {
@@ -274,61 +286,85 @@ __global__ void applyRepetitionPenalty(T*          logits,
 }
 
 template<typename T>
-void invokeApplyRepetitionPenalty(T*           logits,
-                                  const float  penalty,
-                                  const int*   start_ids,
-                                  int*         output_ids,
-                                  const int    batch_size,
-                                  const int    local_batch_size,
-                                  const int    vocab_size,
-                                  const int    vocab_size_padd,
-                                  const int*   input_lengths,
-                                  const int    max_input_len,
-                                  const int    step,
-                                  cudaStream_t stream)
+void invokeApplyRepetitionPenalty(T*                          logits,
+                                  const float                 penalty,
+                                  const int*                  start_ids,
+                                  int*                        output_ids,
+                                  const int                   batch_size,
+                                  const int                   local_batch_size,
+                                  const int                   vocab_size,
+                                  const int                   vocab_size_padd,
+                                  const int*                  input_lengths,
+                                  const int                   max_input_len,
+                                  const int                   step,
+                                  const RepetitionPenaltyType penalty_type,
+                                  cudaStream_t                stream)
 {
-    dim3 block(min(step, 1024));
-    dim3 grid(local_batch_size);
-    applyRepetitionPenalty<T><<<grid, block, step*(sizeof(float) + sizeof(int)), stream>>>(logits,
-                                                                                           penalty,
-                                                                                           start_ids,
-                                                                                           output_ids,
-                                                                                           batch_size,
-                                                                                           local_batch_size,
-                                                                                           vocab_size,
-                                                                                           vocab_size_padd,
-                                                                                           input_lengths,
-                                                                                           max_input_len,
-                                                                                           step);
+    dim3   block(min(step, 1024));
+    dim3   grid(local_batch_size);
+    size_t smem_size = step * (sizeof(float) + sizeof(int));
+
+    if (penalty_type == RepetitionPenaltyType::Additive) {
+        applyRepetitionPenalty<T, RepetitionPenaltyType::Additive><<<grid, block, smem_size, stream>>>(logits,
+                                                                                                       penalty,
+                                                                                                       start_ids,
+                                                                                                       output_ids,
+                                                                                                       batch_size,
+                                                                                                       local_batch_size,
+                                                                                                       vocab_size,
+                                                                                                       vocab_size_padd,
+                                                                                                       input_lengths,
+                                                                                                       max_input_len,
+                                                                                                       step);
+    }
+    else if (penalty_type == RepetitionPenaltyType::Multiplicative) {
+        applyRepetitionPenalty<T, RepetitionPenaltyType::Multiplicative>
+            <<<grid, block, smem_size, stream>>>(logits,
+                                                 penalty,
+                                                 start_ids,
+                                                 output_ids,
+                                                 batch_size,
+                                                 local_batch_size,
+                                                 vocab_size,
+                                                 vocab_size_padd,
+                                                 input_lengths,
+                                                 max_input_len,
+                                                 step);
+    }
+    else if (penalty_type == RepetitionPenaltyType::None) {
+        // do nothing
+    }
 }
 
-template void invokeApplyRepetitionPenalty(float*       logits,
-                                           const float  penalty,
-                                           const int*   start_ids,
-                                           int*         output_ids,
-                                           const int    batch_size,
-                                           const int    local_batch_size,
-                                           const int    vocab_size,
-                                           const int    vocab_size_padd,
-                                           const int*   input_lengths,
-                                           const int    max_input_len,
-                                           const int    step,
-                                           cudaStream_t stream);
+template void invokeApplyRepetitionPenalty(float*                      logits,
+                                           const float                 penalty,
+                                           const int*                  start_ids,
+                                           int*                        output_ids,
+                                           const int                   batch_size,
+                                           const int                   local_batch_size,
+                                           const int                   vocab_size,
+                                           const int                   vocab_size_padd,
+                                           const int*                  input_lengths,
+                                           const int                   max_input_len,
+                                           const int                   step,
+                                           const RepetitionPenaltyType penalty_type,
+                                           cudaStream_t                stream);
 
-template void invokeApplyRepetitionPenalty(half*        logits,
-                                           const float  penalty,
-                                           const int*   start_ids,
-                                           int*         output_ids,
-                                           const int    batch_size,
-                                           const int    local_batch_size,
-                                           const int    vocab_size,
-                                           const int    vocab_size_padd,
-                                           const int*   input_lengths,
-                                           const int    max_input_len,
-                                           const int    step,
-                                           cudaStream_t stream);
+template void invokeApplyRepetitionPenalty(half*                       logits,
+                                           const float                 penalty,
+                                           const int*                  start_ids,
+                                           int*                        output_ids,
+                                           const int                   batch_size,
+                                           const int                   local_batch_size,
+                                           const int                   vocab_size,
+                                           const int                   vocab_size_padd,
+                                           const int*                  input_lengths,
+                                           const int                   max_input_len,
+                                           const int                   step,
+                                           const RepetitionPenaltyType penalty_type,
+                                           cudaStream_t                stream);
 
-template<typename T>
+template<typename T, RepetitionPenaltyType penalty_type>
 __global__ void batchApplyRepetitionPenalty(T*           logits,
                                             const float* penalties,
                                             const int*   output_ids,
@@ -358,7 +394,19 @@ __global__ void batchApplyRepetitionPenalty(T*           logits,
         assert(penalty_index < vocab_size);
         penalty_indices[index] = penalty_index;
         float logit            = (float)logits[penalty_index];
-        penalty_logits[index]  = logit < 0.0f ? logit * penalty : logit / penalty;
+        if (penalty_type == RepetitionPenaltyType::Additive) {
+            penalty_logits[index] = logit - penalty;
+        }
+        else if (penalty_type == RepetitionPenaltyType::Multiplicative) {
+            penalty_logits[index] = logit < 0.0f ? logit * penalty : logit / penalty;
+        }
+        else if (penalty_type == RepetitionPenaltyType::None) {
+            penalty_logits[index] = logit;
+        }
+        else {
+            // Unsupported type
+            assert(false);
+        }
     }
 
     if (blockDim.x > 32) {
@@ -376,16 +424,17 @@ __global__ void batchApplyRepetitionPenalty(T*           logits,
 }
 
 template<typename T>
-void invokeBatchApplyRepetitionPenalty(T*           logits,
-                                       const float* penalties,
-                                       const int*   output_ids,
-                                       const int    batch_size,
-                                       const int    local_batch_size,
-                                       const int    vocab_size,
-                                       const int*   input_lengths,
-                                       const int    max_input_length,
-                                       const int    step,
-                                       cudaStream_t stream)
+void invokeBatchApplyRepetitionPenalty(T*                    logits,
+                                       const float*          penalties,
+                                       const int*            output_ids,
+                                       const int             batch_size,
+                                       const int             local_batch_size,
+                                       const int             vocab_size,
+                                       const int*            input_lengths,
+                                       const int             max_input_length,
+                                       const int             step,
+                                       RepetitionPenaltyType penalty_type,
+                                       cudaStream_t          stream)
 {
     // Inputs
     //   logits [local_batch_size, vocab_size] : logit values.
@@ -396,30 +445,93 @@ void invokeBatchApplyRepetitionPenalty(T*           logits,
     dim3   block(min(step, 1024));
     dim3   grid(local_batch_size);
     size_t smem_size = step * (sizeof(float) + sizeof(int));
-    batchApplyRepetitionPenalty<T><<<grid, block, smem_size, stream>>>(
-        logits, penalties, output_ids, batch_size, vocab_size, input_lengths, max_input_length, step);
+    if (penalty_type == RepetitionPenaltyType::Additive) {
+        batchApplyRepetitionPenalty<T, RepetitionPenaltyType::Additive><<<grid, block, smem_size, stream>>>(
+            logits, penalties, output_ids, batch_size, vocab_size, input_lengths, max_input_length, step);
+    }
+    else if (penalty_type == RepetitionPenaltyType::Multiplicative) {
+        batchApplyRepetitionPenalty<T, RepetitionPenaltyType::Multiplicative><<<grid, block, smem_size, stream>>>(
+            logits, penalties, output_ids, batch_size, vocab_size, input_lengths, max_input_length, step);
+    }
+    else if (penalty_type == RepetitionPenaltyType::None) {
+        // do nothing
+    }
 }
 
-template void invokeBatchApplyRepetitionPenalty(float*       logits,
-                                                const float* penalties,
-                                                const int*   output_ids,
-                                                const int    batch_size,
-                                                const int    local_batch_size,
-                                                const int    vocab_size,
-                                                const int*   input_lengths,
-                                                const int    max_input_length,
-                                                const int    step,
-                                                cudaStream_t stream);
+template void invokeBatchApplyRepetitionPenalty(float*                logits,
+                                                const float*          penalties,
+                                                const int*            output_ids,
+                                                const int             batch_size,
+                                                const int             local_batch_size,
+                                                const int             vocab_size,
+                                                const int*            input_lengths,
+                                                const int             max_input_length,
+                                                const int             step,
+                                                RepetitionPenaltyType penalty_type,
+                                                cudaStream_t          stream);
 
-template void invokeBatchApplyRepetitionPenalty(half*        logits,
-                                                const float* penalties,
-                                                const int*   output_ids,
-                                                const int    batch_size,
-                                                const int    local_batch_size,
-                                                const int    vocab_size,
-                                                const int*   input_lengths,
-                                                const int    max_input_length,
-                                                const int    step,
-                                                cudaStream_t stream);
+template void invokeBatchApplyRepetitionPenalty(half*                 logits,
+                                                const float*          penalties,
+                                                const int*            output_ids,
+                                                const int             batch_size,
+                                                const int             local_batch_size,
+                                                const int             vocab_size,
+                                                const int*            input_lengths,
+                                                const int             max_input_length,
+                                                const int             step,
+                                                RepetitionPenaltyType penalty_type,
+                                                cudaStream_t          stream);
+
+template<typename T>
+__global__ void batchApplyMinLengthPenalty(T*         logits,
+                                           const int* min_lengths,
+                                           const int* end_ids,
+                                           const int* sequence_lengths,
+                                           const int  max_input_length,
+                                           const int  vocab_size_padded)
+{
+    int bid = threadIdx.x + blockIdx.x * blockDim.x;  // batch index
+    // We need +1 because sequence_lengths = max_input_length + num_gen_tokens - 1,
+    // which is equal to the length of k/v caches.
+    if (sequence_lengths[bid] + 1 - max_input_length < min_lengths[bid]) {
+        T mask_val                                     = (std::is_same<T, half>::value) ? -65504.0f : -FLT_MAX;
+        logits[bid * vocab_size_padded + end_ids[bid]] = mask_val;
+    }
+}
+
+template<typename T>
+void invokeMinLengthPenalty(T*           logits,
+                            const int*   min_lengths,
+                            const int*   end_ids,
+                            const int*   sequnece_lengths,
+                            const int    max_input_length,
+                            const int    batch_size,
+                            const int    vocab_size_padded,
+                            cudaStream_t stream)
+
+{
+    const int block_size = min(batch_size, 1024);
+    const int grid_size  = (batch_size + block_size - 1) / block_size;
+    batchApplyMinLengthPenalty<<<grid_size, block_size, 0, stream>>>(
+        logits, min_lengths, end_ids, sequnece_lengths, max_input_length, vocab_size_padded);
+}
+
+template void invokeMinLengthPenalty(float*       logits,
+                                     const int*   min_lengths,
+                                     const int*   end_ids,
+                                     const int*   sequnece_lengths,
+                                     const int    max_input_length,
+                                     const int    batch_size,
+                                     const int    vocab_size_padded,
+                                     cudaStream_t stream);
+
+template void invokeMinLengthPenalty(half*        logits,
+                                     const int*   min_lengths,
+                                     const int*   end_ids,
+                                     const int*   sequnece_lengths,
+                                     const int    max_input_length,
+                                     const int    batch_size,
+                                     const int    vocab_size_padded,
+                                     cudaStream_t stream);
 
 }  // namespace fastertransformer

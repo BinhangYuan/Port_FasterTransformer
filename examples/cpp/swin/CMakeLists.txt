@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,4 +18,4 @@ set(swin_transformer_nv_files
 )
 add_executable(swin_example ${swin_transformer_nv_files})
 target_link_libraries(swin_example PUBLIC trt_fused_multi_head_attention Swin 
-  cublasMMWrapper memory_utils -lcublas -lcublasLt -lcudart -lcudnn tensor)
+  cublasMMWrapper memory_utils -lcublas -lcublasLt -lcudart "${CUDNN_LIBRARY_PATH}" tensor)

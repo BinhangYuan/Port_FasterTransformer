@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,8 +40,6 @@ private:
     void allocateBuffer() override;
     void allocateBuffer(size_t batch_size, size_t max_mem_seq_len);
     void freeBuffer() override;
-    bool isValidBatchSize(size_t batch_size);
-    bool isValidSeqLen(size_t seq_len);
 
 protected:
     using BaseAttentionLayer<T>::stream_;
@@ -86,9 +84,8 @@ public:
 
     ~DecoderCrossAttentionLayer();
 
-    void forward(std::vector<fastertransformer::Tensor>*       output_tensors,
-                 const std::vector<fastertransformer::Tensor>* input_tensors,
-                 const AttentionWeight<T>*                     attention_weights) override;
+    void
+    forward(TensorMap* output_tensors, TensorMap* input_tensors, const AttentionWeight<T>* attention_weights) override;
 };
 
 }  // namespace fastertransformer

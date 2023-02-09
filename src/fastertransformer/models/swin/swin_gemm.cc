@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ int main(int argc, char* argv[])
 {
     if (argc != 8) {
         printf(
-            "[ERROR] swin_gemm batch_img image_width window_width head_num(of the first block) size_per_head data_type is_int8\n");
+            "[ERROR] swin_gemm batch_img image_width window_width head_num(of the first block) size_per_head data_type(0/1/2, fp32/fp16/bf16) is_int8(0/1)\n");
         printf("e.g. ./bin/swin_gemm 32 224 7 3 32 0 1\n");
         return 0;
     }

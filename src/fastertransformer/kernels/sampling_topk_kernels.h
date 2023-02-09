@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  * Copyright (c) 2021, NAVER Corp.  Authored by CLOVA.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -69,8 +69,14 @@ void invokeCurandBatchInitialize(curandState_t*            states,
                                  cudaStream_t              stream);
 
 template<typename T>
-void invokeAddBiasEndMask(
-    T* logits, const T* bias, const int* end_ids, const bool* finished, const int m, const int n, cudaStream_t stream);
+void invokeAddBiasEndMask(T*           logits,
+                          const T*     bias,
+                          const int*   end_ids,
+                          const bool*  finished,
+                          const int    batch_size,
+                          const int    vocab_size,
+                          const int    vocab_size_padded,
+                          cudaStream_t stream);
 
 template<typename T>
 void invokeTopKTopPSampling(void*          workspace,

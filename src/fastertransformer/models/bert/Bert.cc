@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,7 @@ void Bert<T>::initialize()
                                                        0,
                                                        head_num_,
                                                        size_per_head_,
+                                                       0,  // expert_num
                                                        inter_size_,
                                                        tensor_para_,
                                                        stream_,
@@ -73,6 +74,7 @@ void Bert<T>::initialize()
                                                        0,
                                                        head_num_,
                                                        size_per_head_,
+                                                       0,  // expert_num
                                                        inter_size_,
                                                        tensor_para_,
                                                        stream_,
@@ -81,6 +83,7 @@ void Bert<T>::initialize()
                                                        true,
                                                        is_free_buffer_after_forward_,
                                                        sparse_,
+                                                       0,
                                                        use_gated_activation,
                                                        custom_all_reduce_comm_,
                                                        enable_custom_all_reduce_);
@@ -214,8 +217,8 @@ template<typename T>
 void Bert<T>::allocateBuffer(size_t batch_size, size_t seq_len)
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
-    token_num_      = (size_t*)allocator_->reMalloc(token_num_, sizeof(size_t) * 1, false);
-    padding_offset_ = (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * batch_size * seq_len, false);
+    h_pinned_token_num_ptr_ = (size_t*)allocator_->reMalloc(h_pinned_token_num_ptr_, sizeof(size_t), true, true);
+    padding_offset_         = (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * batch_size * seq_len, false);
     trt_mha_padding_offset_ =
         (int*)allocator_->reMalloc(trt_mha_padding_offset_, sizeof(int) * (2 * batch_size + 1), false);
 
@@ -237,28 +240,32 @@ void Bert<T>::allocateBuffer(size_t batch_size, size_t seq_len)
         normed_attn_out_buf_ =
             (T*)allocator_->reMalloc(normed_attn_out_buf_, sizeof(T) * batch_size * seq_len * hidden_units_, false);
     }
+    is_allocate_buffer_ = true;
 }
 
 template<typename T>
 void Bert<T>::freeBuffer()
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
-    allocator_->free((void**)(&token_num_));
-    allocator_->free((void**)(&padding_offset_));
-    allocator_->free((void**)(&trt_mha_padding_offset_));
+    if (is_allocate_buffer_) {
+        allocator_->free((void**)(&h_pinned_token_num_ptr_), true);
+        allocator_->free((void**)(&padding_offset_));
+        allocator_->free((void**)(&trt_mha_padding_offset_));
 
-    allocator_->free((void**)(&attention_mask_));
-    allocator_->free((void**)(&bert_in_buffer_));
-    allocator_->free((void**)(&attn_out_buf_));
-    allocator_->free((void**)(&bert_out_buffer_));
+        allocator_->free((void**)(&attention_mask_));
+        allocator_->free((void**)(&bert_in_buffer_));
+        allocator_->free((void**)(&attn_out_buf_));
+        allocator_->free((void**)(&bert_out_buffer_));
 
-    if (layernorm_type_ == LayerNormType::post_layernorm) {
-        normed_from_tensor_  = nullptr;
-        normed_attn_out_buf_ = nullptr;
-    }
-    else {
-        allocator_->free((void**)(&normed_from_tensor_));
-        allocator_->free((void**)(&normed_attn_out_buf_));
+        if (layernorm_type_ == LayerNormType::post_layernorm) {
+            normed_from_tensor_  = nullptr;
+            normed_attn_out_buf_ = nullptr;
+        }
+        else {
+            allocator_->free((void**)(&normed_from_tensor_));
+            allocator_->free((void**)(&normed_attn_out_buf_));
+        }
+        is_allocate_buffer_ = false;
     }
 }
 
@@ -360,8 +367,8 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
                     stream_);
                 sync_check_cuda_error();
                 invokeGetPaddingOffset(
+                    h_pinned_token_num_ptr_,
                     &h_token_num,
-                    token_num_,
                     padding_offset_,
                     input_tensors->at("sequence_lengths").getPtrWithOffset<int>(ite * local_batch_size),
                     local_batch_size,
@@ -400,8 +407,8 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
             }
             case AttentionType::FUSED_MHA: {
                 invokeGetPaddingOffset(
+                    h_pinned_token_num_ptr_,
                     &h_token_num,
-                    token_num_,
                     padding_offset_,
                     input_tensors->at("sequence_lengths").getPtrWithOffset<int>(ite * local_batch_size),
                     local_batch_size,
@@ -471,7 +478,6 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
                                     stream_);
                 }
             }
-
             if (layernorm_type_ == LayerNormType::pre_layernorm) {
                 invokeGeneralLayerNorm(normed_from_tensor_,
                                        from_tensor,
@@ -480,28 +486,34 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
                                        layernorm_eps_,
                                        h_token_num,
                                        hidden_units_,
+                                       (float*)nullptr,
+                                       0,
                                        stream_);
                 sync_check_cuda_error();
             }
             // Attention
             {
-                std::vector<Tensor> attn_input_tensors{
-                    Tensor{MEMORY_GPU,
-                           data_type,
-                           std::vector<size_t>{h_token_num, hidden_units_},
-                           layernorm_type_ == LayerNormType::pre_layernorm ? normed_from_tensor_ : from_tensor},
-                    Tensor{MEMORY_GPU,
-                           data_type,
-                           std::vector<size_t>{local_batch_size, 1, request_seq_len, request_seq_len},
-                           attention_mask_},
-                    *padding_offset_tensor_ptr};
-                std::vector<Tensor> attn_output_tensors{
-                    Tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, hidden_units_}, attn_out_buf_}};
+                TensorMap attn_input_tensors{
+                    {"input_query",
+                     Tensor{MEMORY_GPU,
+                            data_type,
+                            std::vector<size_t>{h_token_num, hidden_units_},
+                            layernorm_type_ == LayerNormType::pre_layernorm ? normed_from_tensor_ : from_tensor}},
+                    {"attention_mask",
+                     Tensor{MEMORY_GPU,
+                            data_type,
+                            std::vector<size_t>{local_batch_size, 1, request_seq_len, request_seq_len},
+                            attention_mask_}}};
+                attn_input_tensors.insertIfValid("padding_offset", *padding_offset_tensor_ptr);
+                TensorMap attn_output_tensors(
+                    {{"hidden_features",
+                      Tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, hidden_units_}, attn_out_buf_}}});
 
                 bool use_custom_all_reduce_kernel = false;
                 if (enable_custom_all_reduce_ && custom_all_reduce_comm_ != nullptr) {
+                    std::vector<Tensor> hidden_features{attn_output_tensors.at("hidden_features")};
                     use_custom_all_reduce_kernel =
-                        custom_all_reduce_comm_->swapInternalBuffer(&attn_output_tensors, h_token_num * hidden_units_);
+                        custom_all_reduce_comm_->swapInternalBuffer(&hidden_features, h_token_num * hidden_units_);
                 }
 
                 if (attention_type == AttentionType::FUSED_MHA || attention_type == AttentionType::FUSED_PADDED_MHA) {
@@ -544,6 +556,7 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
                 invokeGeneralAddBiasResidualPreLayerNorm(
                     attn_out_buf_,
                     normed_attn_out_buf_,
+                    attn_out_buf_,
                     from_tensor,
                     bert_weights->bert_layer_weights[l].ffn_layernorm_weights.gamma,
                     bert_weights->bert_layer_weights[l].ffn_layernorm_weights.beta,
@@ -551,19 +564,26 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
                     layernorm_eps_,
                     h_token_num,
                     hidden_units_,
+                    (float*)nullptr,
+                    (float*)nullptr,
+                    (float*)nullptr,
+                    (float*)nullptr,
+                    0,
                     stream_);
             }
             sync_check_cuda_error();
 
             // FFN
             {
-                std::vector<Tensor> ffn_input_tensors{
-                    Tensor{MEMORY_GPU,
-                           data_type,
-                           std::vector<size_t>{h_token_num, hidden_units_},
-                           layernorm_type_ == LayerNormType::pre_layernorm ? normed_attn_out_buf_ : attn_out_buf_}};
-                std::vector<Tensor> ffn_output_tensors{
-                    Tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, hidden_units_}, out_tensor}};
+                TensorMap ffn_input_tensors(
+                    {{"ffn_input",
+                      Tensor{MEMORY_GPU,
+                             data_type,
+                             std::vector<size_t>{h_token_num, hidden_units_},
+                             layernorm_type_ == LayerNormType::pre_layernorm ? normed_attn_out_buf_ : attn_out_buf_}}});
+                TensorMap ffn_output_tensors(
+                    {{"ffn_output",
+                      Tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, hidden_units_}, out_tensor}}});
                 ffn_layer_->forward(
                     &ffn_output_tensors, &ffn_input_tensors, &bert_weights->bert_layer_weights[l].ffn_weights);
             }
@@ -609,6 +629,8 @@ void Bert<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, const
                                        layernorm_eps_,
                                        h_token_num,
                                        hidden_units_,
+                                       (float*)nullptr,
+                                       0,
                                        stream_);
                 sync_check_cuda_error();
             }

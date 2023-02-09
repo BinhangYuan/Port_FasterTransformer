@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,8 +28,15 @@ elseif(EXISTS ${TF_PATH}libtensorflow_framework.so.2)
     )
 endif()
 
-add_subdirectory(bert)
-add_subdirectory(encoder)
-add_subdirectory(decoder)
-add_subdirectory(decoding)
-add_subdirectory(gpt)
+if(BUILD_TF)
+  add_subdirectory(bert)
+  add_subdirectory(encoder)
+  add_subdirectory(decoder)
+  add_subdirectory(decoding)
+  add_subdirectory(gpt)
+endif()
+
+if(BUILD_TF2)
+  add_subdirectory(t5)
+  add_subdirectory(deberta)
+endif()

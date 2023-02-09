@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include "src/fastertransformer/layers/TensorParallelGeluFfnLayer.h"
 #include "src/fastertransformer/layers/TensorParallelReluFfnLayer.h"
 #include "src/fastertransformer/layers/TensorParallelSiluFfnLayer.h"
+#include "src/fastertransformer/layers/adapter_layers/LinearAdapterLayer.h"
 #include "src/fastertransformer/layers/attention_layers/TensorParallelDecoderCrossAttentionLayer.h"
 #include "src/fastertransformer/layers/attention_layers/TensorParallelDecoderSelfAttentionLayer.h"
 #include "src/fastertransformer/models/t5/T5DecoderLayerWeight.h"
@@ -46,13 +47,17 @@ private:
     const size_t         d_model_;
     const size_t         num_layer_;
     const size_t         hidden_units_;
+    const size_t         expert_num_;
+    const size_t         moe_k_;
     const ActivationType activation_type_;
     const float          layernorm_eps_;
     float                q_scaling_;
+    std::vector<int64_t> moe_layer_index_;
 
     BaseAttentionLayer<T>* self_attention_layer_;
     BaseAttentionLayer<T>* cross_attention_layer_;
     FfnLayer<T>*           ffn_layer_;
+    LinearAdapterLayer<T>* adapter_layer_ = nullptr;
 
     void allocateBuffer() override;
     void freeBuffer() override;
@@ -66,6 +71,7 @@ private:
 
     std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm_;
     int                                 enable_custom_all_reduce_;
+    LinearAdapterConfig                 adapter_config_;
 
     bool isValidLayerParallelId(uint l);
     bool isFirstLayerParallelId(uint l);
@@ -80,6 +86,11 @@ protected:
     T* normed_cross_attn_output_ = nullptr;
     T* decoder_layer_output_     = nullptr;
 
+    T*   expert_scales_                            = nullptr;
+    int* expanded_source_row_to_expanded_dest_row_ = nullptr;
+    int* expert_for_source_row_                    = nullptr;
+    T*   fc2_result_                               = nullptr;
+
 public:
     T5Decoder(size_t                              max_batch_size,
               size_t                              head_num,
@@ -87,7 +98,10 @@ public:
               size_t                              inter_size,
               size_t                              d_model,
               size_t                              num_layer,
+              size_t                              expert_num,
+              size_t                              moe_k,
               float                               layernorm_eps_,
+              std::vector<int64_t>                moe_layer_index,
               cudaStream_t                        stream,
               cublasMMWrapper*                    cublas_wrapper,
               IAllocator*                         allocator,
@@ -97,7 +111,8 @@ public:
               ActivationType                      activation_type,
               float                               q_scaling                = 1.0f,
               std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm   = nullptr,
-              int                                 enable_custom_all_reduce = 0);
+              int                                 enable_custom_all_reduce = 0,
+              LinearAdapterConfig const&          adapter_config           = {});
 
     T5Decoder(T5Decoder<T> const& decoder);
 
@@ -106,6 +121,12 @@ public:
     void forward(std::vector<Tensor>*                         output_tensors,
                  const std::vector<Tensor>*                   input_tensors,
                  const std::vector<T5DecoderLayerWeight<T>*>* decoder_layer_weights);
+
+    bool has_adapters() const
+    {
+        return adapter_config_.enabled();
+    }
+
     void setStream(cudaStream_t stream) override;
 };
 

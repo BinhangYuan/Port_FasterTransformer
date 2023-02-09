@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2022-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,18 +23,32 @@ void TensorParallelSiluFfnLayer<T>::forward(std::vector<fastertransformer::Tenso
                                             const std::vector<fastertransformer::Tensor>* input_tensors,
                                             const FfnWeight<T>*                           ffn_weights)
 {
-    const size_t token_num    = output_tensors->at(0).shape[0];
-    const size_t hidden_units = output_tensors->at(0).shape[1];
+    TensorMap input_tensor({{"ffn_input", input_tensors->at(0)}});
+    TensorMap output_tensor({{"ffn_output", output_tensors->at(0)}});
+    forward(&output_tensor, &input_tensor, ffn_weights);
+}
+
+template<typename T>
+void TensorParallelSiluFfnLayer<T>::forward(TensorMap*          output_tensors,
+                                            TensorMap*          input_tensors,
+                                            const FfnWeight<T>* ffn_weights)
+{
+    FT_LOG_DEBUG("%s start", __PRETTY_FUNCTION__);
+    Tensor       out_tensor   = output_tensors->at("ffn_output");
+    const size_t token_num    = out_tensor.shape[0];
+    const size_t hidden_units = out_tensor.shape[1];
+
+    std::vector<Tensor> swap_tensors = {out_tensor};
 
     bool use_custom_all_reduce_kernel = false;
     if (enable_custom_all_reduce_ && custom_all_reduce_comm_ != nullptr) {
         use_custom_all_reduce_kernel =
-            custom_all_reduce_comm_->swapInternalBuffer(output_tensors, token_num * hidden_units);
+            custom_all_reduce_comm_->swapInternalBuffer(&swap_tensors, token_num * hidden_units);
     }
 
     SiluFfnLayer<T>::forward(output_tensors, input_tensors, ffn_weights);
 
-    T* ffn_out = (T*)(output_tensors->at(0).data);
+    T* ffn_out = out_tensor.getPtr<T>();
     if (do_all_reduce_ && tensor_para_.world_size_ > 1) {
         if (!use_custom_all_reduce_kernel) {
             ftNcclAllReduceSum(ffn_out, ffn_out, token_num * hidden_units, tensor_para_, SiluFfnLayer<T>::stream_);
@@ -51,6 +65,7 @@ TensorParallelSiluFfnLayer<T>::TensorParallelSiluFfnLayer(size_t           max_b
                                                           size_t           max_seq_len,
                                                           size_t           head_num,
                                                           size_t           size_per_head,
+                                                          size_t           expert_num,
                                                           size_t           inter_size,
                                                           NcclParam        tensor_para,
                                                           cudaStream_t     stream,
@@ -66,6 +81,7 @@ TensorParallelSiluFfnLayer<T>::TensorParallelSiluFfnLayer(size_t           max_b
                     max_seq_len,
                     head_num,
                     size_per_head,
+                    expert_num,
                     inter_size / tensor_para.world_size_,
                     stream,
                     cublas_wrapper,

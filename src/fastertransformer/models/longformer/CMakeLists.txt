@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,4 +19,4 @@ set_property(TARGET LongformerEncoder PROPERTY POSITION_INDEPENDENT_CODE  ON)
 set_property(TARGET LongformerEncoder PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS  ON)
 target_link_libraries(LongformerEncoder PUBLIC -lcublas -lcudart -lcurand cublasMMWrapper
                       LongformerAttentionLayer longformer_kernels add_bias_transpose_kernels
-                      activation_kernels layernorm_kernels FfnLayer tensor)
+                      activation_kernels layernorm_kernels FfnLayer tensor cuda_utils logger)

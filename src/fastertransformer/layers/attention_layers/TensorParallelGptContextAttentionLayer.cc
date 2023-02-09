@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,14 @@
  */
 
 #include "src/fastertransformer/layers/attention_layers/TensorParallelGptContextAttentionLayer.h"
+#include "src/fastertransformer/utils/nvtx_utils.h"
 
 namespace fastertransformer {
 
 template<typename T>
-void TensorParallelGptContextAttentionLayer<T>::forward(std::vector<fastertransformer::Tensor>*       output_tensors,
-                                                        const std::vector<fastertransformer::Tensor>* input_tensors,
-                                                        const AttentionWeight<T>*                     attention_weights)
+void TensorParallelGptContextAttentionLayer<T>::forward(TensorMap*                output_tensors,
+                                                        TensorMap*                input_tensors,
+                                                        const AttentionWeight<T>* attention_weights)
 {
     // input_tensors:
     //      input_query [batch_size * seq_len, hidden_dimension]
@@ -29,31 +30,32 @@ void TensorParallelGptContextAttentionLayer<T>::forward(std::vector<fastertransf
     //      is_final_layer [1], bool on cpu
 
     // output_tensors:
-    //      attention_out [batch_size * seq_len, hidden_dimension]
+    //      hidden_features [batch_size * seq_len, hidden_dimension]
     //      key_cache [batch, local_head_num, size_per_head // x, max_seq_len, x]
     //      value_cache [batch, local_head_num, max_seq_len, size_per_head]
 
-    const size_t m            = output_tensors->at(0).shape[0];
-    const size_t hidden_units = output_tensors->at(0).shape[1];
+    const size_t size = output_tensors->at("hidden_features").size();
 
     bool use_custom_all_reduce_kernel = false;
     if (do_all_reduce_ && enable_custom_all_reduce_ && custom_all_reduce_comm_ != nullptr) {
-        use_custom_all_reduce_kernel = custom_all_reduce_comm_->swapInternalBuffer(output_tensors, m * hidden_units);
+        std::vector<Tensor> reduce_tensor{output_tensors->at("hidden_features")};
+        use_custom_all_reduce_kernel = custom_all_reduce_comm_->swapInternalBuffer(&reduce_tensor, size);
     }
 
     GptContextAttentionLayer<T>::forward(output_tensors, input_tensors, attention_weights);
 
-    T* attention_out = (T*)(output_tensors->at(0).data);
+    PUSH_RANGE("all reduce sum");
+    T* attention_out = output_tensors->getPtr<T>("hidden_features");
     if (do_all_reduce_ && tensor_para_.world_size_ > 1) {
         if (!use_custom_all_reduce_kernel) {
-            ftNcclAllReduceSum(
-                attention_out, attention_out, m * hidden_units, tensor_para_, GptContextAttentionLayer<T>::stream_);
+            ftNcclAllReduceSum(attention_out, attention_out, size, tensor_para_, GptContextAttentionLayer<T>::stream_);
         }
         else {
-            custom_all_reduce_comm_->customAllReduce(m * hidden_units, GptContextAttentionLayer<T>::stream_);
+            custom_all_reduce_comm_->customAllReduce(size, GptContextAttentionLayer<T>::stream_);
         }
         sync_check_cuda_error();
     }
+    POP_RANGE;
 }
 
 template<typename T>
@@ -70,6 +72,7 @@ TensorParallelGptContextAttentionLayer<T>::TensorParallelGptContextAttentionLaye
     bool                                is_free_buffer_after_forward,
     bool                                is_qk_buf_float,
     bool                                sparse,
+    int                                 int8_mode,
     std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm,
     int                                 enable_custom_all_reduce):
     GptContextAttentionLayer<T>(max_batch_size,
@@ -82,7 +85,8 @@ TensorParallelGptContextAttentionLayer<T>::TensorParallelGptContextAttentionLaye
                                 allocator,
                                 is_free_buffer_after_forward,
                                 is_qk_buf_float,
-                                sparse),
+                                sparse,
+                                int8_mode),
     tensor_para_(tensor_para),
     custom_all_reduce_comm_(custom_all_reduce_comm),
     enable_custom_all_reduce_(enable_custom_all_reduce),
@@ -107,6 +111,7 @@ TensorParallelGptContextAttentionLayer<T>::TensorParallelGptContextAttentionLaye
     bool                                is_free_buffer_after_forward,
     bool                                is_qk_buf_float,
     bool                                sparse,
+    int                                 int8_mode,
     std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm,
     int                                 enable_custom_all_reduce):
     GptContextAttentionLayer<T>(max_batch_size,
@@ -121,7 +126,8 @@ TensorParallelGptContextAttentionLayer<T>::TensorParallelGptContextAttentionLaye
                                 allocator,
                                 is_free_buffer_after_forward,
                                 is_qk_buf_float,
-                                sparse),
+                                sparse,
+                                int8_mode),
     tensor_para_(tensor_para),
     custom_all_reduce_comm_(custom_all_reduce_comm),
     enable_custom_all_reduce_(enable_custom_all_reduce),

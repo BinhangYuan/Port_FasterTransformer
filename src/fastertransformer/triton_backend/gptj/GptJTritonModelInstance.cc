@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -104,6 +104,20 @@ std::unordered_map<std::string, ft::Tensor> GptJTritonModelInstance<T>::convert_
              as_GPU_tensor(input_tensors->at("request_prompt_embedding"), d_request_prompt_embedding_)});
     }
 
+    if (input_tensors->find("top_p_decay") != input_tensors->end()) {
+        move_tensor_H2D(input_tensors->at("top_p_decay"), d_top_p_decay_, &allocator_);
+        ft_input_tensors.insert({"top_p_decay", as_GPU_tensor(input_tensors->at("top_p_decay"), d_top_p_decay_)});
+    }
+    if (input_tensors->find("top_p_min") != input_tensors->end()) {
+        move_tensor_H2D(input_tensors->at("top_p_min"), d_top_p_min_, &allocator_);
+        ft_input_tensors.insert({"top_p_min", as_GPU_tensor(input_tensors->at("top_p_min"), d_top_p_min_)});
+    }
+    if (input_tensors->find("top_p_reset_ids") != input_tensors->end()) {
+        move_tensor_H2D(input_tensors->at("top_p_reset_ids"), d_top_p_reset_ids_, &allocator_);
+        ft_input_tensors.insert(
+            {"top_p_reset_ids", as_GPU_tensor(input_tensors->at("top_p_reset_ids"), d_top_p_reset_ids_)});
+    }
+
     for (auto t = input_tensors->begin(); t != input_tensors->end(); ++t) {
         if (t->first.find("input_ids") == std::string::npos && t->first.find("input_lengths") == std::string::npos
             && t->first.find("output_seq_len") == std::string::npos
@@ -146,10 +160,10 @@ std::shared_ptr<std::unordered_map<std::string, triton::Tensor>>
 GptJTritonModelInstance<T>::forward(std::shared_ptr<std::unordered_map<std::string, triton::Tensor>> input_tensors)
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
-    ft::FT_CHECK_WITH_INFO(input_tensors->at("input_ids").shape.size() == 2,
-                           "input_tensors->at(\"input_ids\").shape.size() == 2");
-    ft::FT_CHECK_WITH_INFO(input_tensors->at("input_lengths").shape.size() == 1,
-                           "input_tensors->at(\"input_lengths\").shape.size() == 1");
+    FT_CHECK_WITH_INFO(input_tensors->at("input_ids").shape.size() == 2,
+                       "input_tensors->at(\"input_ids\").shape.size() == 2");
+    FT_CHECK_WITH_INFO(input_tensors->at("input_lengths").shape.size() == 1,
+                       "input_tensors->at(\"input_lengths\").shape.size() == 1");
 
     const uint32_t request_batch_size     = input_tensors->at("input_ids").shape[0];
     const uint32_t max_request_output_len = (size_t)*std::max_element(
@@ -188,12 +202,20 @@ GptJTritonModelInstance<T>::forward(std::shared_ptr<std::unordered_map<std::stri
                                           d_cum_log_probs_}});
     }
 
-    if (stream_cb_ != nullptr) {
-        gpt_->registerCallback(triton_stream_callback<T>, this);
+    try {
+        if (stream_cb_ != nullptr) {
+            gpt_->registerCallback(triton_stream_callback<T>, this);
+        }
+
+        gpt_->forward(&output_tensors, &ft_input_tensors, gpt_weight_.get());
+
+        if (stream_cb_ != nullptr) {
+            gpt_->unRegisterCallback();
+        }
     }
-    gpt_->forward(&output_tensors, &ft_input_tensors, gpt_weight_.get());
-    if (stream_cb_ != nullptr) {
-        gpt_->unRegisterCallback();
+    catch (...) {
+        h_exception_ = std::current_exception();
+        output_tensors.insert({"error_message", ft::Tensor{ft::MEMORY_CPU, ft::TYPE_BYTES, {1}, &h_exception_}});
     }
 
     if (h_total_output_lengths_ != nullptr) {

@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,11 +22,13 @@ set(swintransformer_ths_files
 add_definitions(-DTORCH_CUDA=1)
 
 if(BUILD_PYT)
-  set(LIB_NAME "pyt_swintransformer")
-  add_library(${LIB_NAME} SHARED ${swintransformer_ths_files})
+  set(LIB_NAME "th_swintransformer")
+  add_library(${LIB_NAME} STATIC ${swintransformer_ths_files})
+  set_property(TARGET ${LIB_NAME} PROPERTY POSITION_INDEPENDENT_CODE  ON)
   set_target_properties(${LIB_NAME} PROPERTIES
                         CUDA_RESOLVE_DEVICE_SYMBOLS ON)
   target_link_libraries(${LIB_NAME} "${TORCH_LIBRARIES}" Swin SwinINT8 
     cublasINT8MMWrapper cublasAlgoMap trt_fused_multi_head_attention 
-    gen_relative_pos_bias quantize_weight -lcudnn -lcublas -lcudart)
+    gen_relative_pos_bias quantize_weight transform_mask_kernels
+    "${CUDNN_LIBRARY_PATH}" -lcublas -lcudart)
 endif()

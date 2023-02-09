@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -135,6 +135,7 @@ def validate(args, data_config, config, model):
     max_batch = args.batch_size
     img_size = args.img_size
     int8_mode = args.int8_mode
+    with_cls_token = config.classifier == 'token'
     in_chans = 3
     model.half()
     
@@ -155,7 +156,8 @@ def validate(args, data_config, config, model):
                                                         num_heads,
                                                         inter_size,
                                                         layer_num,
-                                                        int8_mode
+                                                        int8_mode,
+                                                        with_cls_token
                                                         )
     except:
         # legacy ths for 20.03 image
@@ -168,7 +170,8 @@ def validate(args, data_config, config, model):
                                                         num_heads,
                                                         inter_size,
                                                         layer_num,
-                                                        int8_mode
+                                                        int8_mode,
+                                                        with_cls_token
                                                         )
 
     end = time.time()

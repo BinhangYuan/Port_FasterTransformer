@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  * Copyright (c) 2021, NAVER Corp.  Authored by CLOVA.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -257,6 +257,15 @@ public:
         ft::NcclParam tensor_para;
         ft::NcclParam pipeline_para;
 
+        ft::AttentionType attention_type =
+            ft::getAttentionType<T>(size_per_head_,
+                                    ft::getSMVersion(),
+                                    true,
+                                    max_input_length,  // gpt supports any-seq-length fmha
+                                    true,              // is_fuse
+                                    false,             // with_relative_position_bias
+                                    true);             // causal_mask
+
         ft::ParallelGpt<DataType> gpt = ft::ParallelGpt<DataType>(batch_size,
                                                                   total_output_length,
                                                                   max_input_length,
@@ -265,6 +274,9 @@ public:
                                                                   size_per_head_,
                                                                   inter_size_,
                                                                   num_layer_,
+                                                                  0,   // expert_num
+                                                                  0,   // moe_k
+                                                                  {},  // moe_layer_index
                                                                   vocab_size,
                                                                   start_id_,
                                                                   end_id_,
@@ -285,6 +297,7 @@ public:
                                                                   &allocator,
                                                                   false,
                                                                   &prop_,
+                                                                  attention_type,
                                                                   false,
                                                                   0);
 

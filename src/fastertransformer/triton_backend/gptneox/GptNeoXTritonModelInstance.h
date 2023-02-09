@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2022-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,17 +62,21 @@ private:
                         const size_t max_request_output_len);
     void freeBuffer();
 
-    int* d_input_ids_                = nullptr;
-    int* d_input_lengths_            = nullptr;
-    int* d_input_bad_words_          = nullptr;
-    int* d_input_stop_words_         = nullptr;
-    int* d_request_prompt_lengths_   = nullptr;
-    T*   d_request_prompt_embedding_ = nullptr;
+    int*   d_input_ids_                = nullptr;
+    int*   d_input_lengths_            = nullptr;
+    int*   d_input_bad_words_          = nullptr;
+    int*   d_input_stop_words_         = nullptr;
+    int*   d_request_prompt_lengths_   = nullptr;
+    T*     d_request_prompt_embedding_ = nullptr;
+    float* d_top_p_decay_              = nullptr;
+    float* d_top_p_min_                = nullptr;
+    int*   d_top_p_reset_ids_          = nullptr;
 
     int*   d_output_ids_       = nullptr;
     int*   d_sequence_lengths_ = nullptr;
     float* d_output_log_probs_ = nullptr;
     float* d_cum_log_probs_    = nullptr;
 
-    uint32_t* h_total_output_lengths_ = nullptr;
+    uint32_t*          h_total_output_lengths_ = nullptr;
+    std::exception_ptr h_exception_            = nullptr;
 };

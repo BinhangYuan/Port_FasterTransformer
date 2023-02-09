@@ -4,7 +4,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Ze Liu
 # --------------------------------------------------------
-# Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -143,7 +143,7 @@ _C.TEST = CN()
 # Whether to use center crop when testing
 _C.TEST.CROP = False
 # Whether to use SequentialSampler as validation sampler
-_C.TEST.SEQUENTIAL = False
+_C.TEST.SEQUENTIAL = True
 
 # -----------------------------------------------------------------------------
 # Misc

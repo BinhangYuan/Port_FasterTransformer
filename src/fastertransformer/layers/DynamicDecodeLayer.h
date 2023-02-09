@@ -19,6 +19,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "src/fastertransformer/kernels/beam_search_topk_kernels.h"
 #include "src/fastertransformer/layers/BaseLayer.h"
 #include "src/fastertransformer/layers/DynamicDecodeBaseLayer.h"
 #include "src/fastertransformer/layers/sampling_layers/TopPSamplingLayer.h"
@@ -31,7 +32,7 @@ protected:
     void allocateBuffer() override;
     void freeBuffer() override;
     void initialize();
-    bool hasDiffRuntimeArgs(const std::unordered_map<std::string, Tensor>* input_tensors);
+    bool hasDiffRuntimeArgs(TensorMap* input_tensors);
 
     DynamicDecodeBaseLayer* online_beamsearch_decode_;
     DynamicDecodeBaseLayer* beamsearch_decode_;
@@ -44,10 +45,15 @@ protected:
 
     // List of argument names which can have different values in runtime
     // and does not support a batched version of kernel in beam search.
-    const std::vector<std::string> runtime_arg_names_ = {
-        "beam_search_diversity_rate", "temperature", "len_penalty", "repetition_penalty"};
+    const std::vector<std::string> runtime_arg_names_ = {"beam_search_diversity_rate",
+                                                         "temperature",
+                                                         "len_penalty",
+                                                         "repetition_penalty",
+                                                         "presence_penalty",
+                                                         "min_length"};
+
     bool has_diff_runtime_args_ = false;
-    int* finished_sum_          = nullptr;
+    int* h_pinned_finished_sum_ = nullptr;
 
 public:
     DynamicDecodeLayer(size_t           vocab_size,
@@ -62,9 +68,8 @@ public:
     ~DynamicDecodeLayer();
     DynamicDecodeLayer(DynamicDecodeLayer const& dynamic_decode_layer);
 
-    void setup(const size_t                                   batch_size,
-               const size_t                                   beam_width,
-               const std::unordered_map<std::string, Tensor>* runtime_args);
+    void setup(const size_t batch_size, const size_t beam_width, TensorMap* runtime_args);
+    void forward(TensorMap* output_tensors, TensorMap* input_tensors);
     void forward(std::unordered_map<std::string, Tensor>*       output_tensors,
                  const std::unordered_map<std::string, Tensor>* input_tensors);
 };

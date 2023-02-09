@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 
 #include "src/fastertransformer/models/bert/Bert.h"
 #include "src/fastertransformer/utils/logger.h"
+#include "src/fastertransformer/utils/nvtx_utils.h"
+#include <cuda_profiler_api.h>
 
 using namespace fastertransformer;
 
@@ -44,17 +46,14 @@ int main(int argc, char** argv)
     const CublasDataType data_type         = static_cast<CublasDataType>(atoi(argv[6]));  // 0 FP32, 1 FP16, 2 BF 16
 
     if (data_type == FLOAT_DATATYPE) {
-        return bertExample<float>(
-            batch_size, num_layers, seq_len, head_num, size_per_head, is_remove_padding);
+        return bertExample<float>(batch_size, num_layers, seq_len, head_num, size_per_head, is_remove_padding);
     }
     else if (data_type == HALF_DATATYPE) {
-        return bertExample<half>(
-            batch_size, num_layers, seq_len, head_num, size_per_head, is_remove_padding);
+        return bertExample<half>(batch_size, num_layers, seq_len, head_num, size_per_head, is_remove_padding);
     }
 #ifdef ENABLE_BF16
     else if (data_type == BFLOAT16_DATATYPE) {
-        return bertExample<__nv_bfloat16>(
-            batch_size, num_layers, seq_len, head_num, size_per_head, is_remove_padding);
+        return bertExample<__nv_bfloat16>(batch_size, num_layers, seq_len, head_num, size_per_head, is_remove_padding);
     }
 #endif
     else {
@@ -64,12 +63,8 @@ int main(int argc, char** argv)
 }
 
 template<typename T>
-int bertExample(size_t batch_size,
-                size_t num_layers,
-                size_t seq_len,
-                size_t head_num,
-                size_t size_per_head,
-                bool   is_remove_padding)
+int bertExample(
+    size_t batch_size, size_t num_layers, size_t seq_len, size_t head_num, size_t size_per_head, bool is_remove_padding)
 {
     printf("[INFO] Device: %s \n", getDeviceName().c_str());
     print_mem_usage("Before loading model");
@@ -168,12 +163,14 @@ int bertExample(size_t batch_size,
     print_mem_usage("After inference");
 
     // profile time
-    const int ite = 10;
+    const int ite = 100;
     CudaTimer cuda_timer(stream);
     cuda_timer.start();
+    cudaProfilerStart();
     for (int i = 0; i < ite; i++) {
         bert.forward(&output_tensors, &input_tensors, &bert_weights);
     }
+    cudaProfilerStop();
     float total_time = cuda_timer.stop();
 
     FT_LOG_INFO("batch_size %ld seq_len %ld layer %ld "

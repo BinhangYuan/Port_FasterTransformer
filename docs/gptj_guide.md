@@ -5,6 +5,7 @@
 - [GPT-J](#gpt-j)
   - [Table Of Contents](#table-of-contents)
   - [Introduction](#introduction)
+    - [Inference Options](#inference-options)
     - [Supported features](#supported-features)
   - [Setup](#setup)
     - [Requirements](#requirements)
@@ -71,15 +72,17 @@ Optimization in GPT-j are similar to optimization in GPT, describing in the [gpt
 |           start_id            |                 [batch_size]                  |   CPU    |          int           |                             **Optional**. If FT receives this input, FT will replace default start id by it                             |
 |            end_id             |                 [batch_size]                  |   CPU    |          int           |                              **Optional**. If FT receives this input, FT will replace default end id by it                              |
 |        stop_words_list        |      [batch_size, 2, stop_words_length]       |   GPU    |          int           |                                       **Optional**. FT would not generate the tokens in the list.                                       |
-|        bad_words_list         |       [batch_size, 2, bad_words_length]       |   GPU    |          int           | **Optional**. The words in the list will be When FT generates words in this list, it will stop the generation. An extension of stop id  |
+|        bad_words_list         |       [batch_size, 2, bad_words_length]       |   GPU    |          int           |                                       **Optional**. The words in the list will never be sampled.                                        |
 |         runtime_top_k         |              [1] or [batch_size]              |   CPU    |          uint          |                                              **Optional**. top_k value for top k sampling                                               |
 |         runtime_top_p         |              [1] or [batch_size]              |   CPU    |         float          |                                              **Optional**. top_p value for top p sampling                                               |
 |  beam_search_diversity_rate   |              [1] or [batch_size]              |   CPU    |         float          |                **Optional**. A hyper hyper-parameter for [simple diverse decoding](https://arxiv.org/pdf/1611.08562.pdf)                |
 |          temperature          |              [1] or [batch_size]              |   CPU    |         float          |                              **Optional**. Temperature applied to logits for both beam search and sampling                              |
 |          len_penalty          |              [1] or [batch_size]              |   CPU    |         float          |                                   **Optional**. Length penalty applied to logits for only beam search                                   |
-|      repetition_penalty       |              [1] or [batch_size]              |   CPU    |         float          |                          **Optional**. Repetition penalty applied to logits for both beam search and sampling                           |
+|      repetition_penalty       |              [1] or [batch_size]              |   CPU    |         float          |                          **Optional**. Repetition penalty applied to logits for both beam search and sampling. Exclusive with presence_penalty.                          |
+|       presence_penalty        |              [1] or [batch_size]              |   CPU    |         float          |                                                  **Optional**. Presence penalty - additive type of repetition penalty - applied to logits for both beam search and sampling. Exclusive with repetition_penalty.                                                  |
+|           min_length          |              [1] or [batch_size]              |   CPU    |          int           |                                                  **Optional**. Minimum number of tokens to generate                                                  |
 |          random_seed          |              [1] or [batch_size]              |   CPU    | unsigned long long int |                                  **Optional**. Random seed to initialize the random table in sampling.                                  |
-|    request_prompt_lengths     |                 [batch_size],                 |   CPU    |          int           |     **Optional**. Length of prefix soft prompt embedding. This describes how many tokens of soft prompt embedding in each sentence.     |
+|    request_prompt_lengths     |                 [batch_size],                 |   GPU    |          int           |     **Optional**. Length of prefix soft prompt embedding. This describes how many tokens of soft prompt embedding in each sentence.     |
 |   request_prompt_embedding    | [batch_size, max_prompt_length, hidden_units] |   GPU    |         float          |                 **Optional**. Prefix soft prompt embedding. FT will concat them with results of embedding lookup kernel                 |
 |      request_prompt_type      |                 [batch_size]                  |   CPU    |          int           |                  **Optional**. Prompt type of request. This is necessary when user pass the prompt embedding by input                   |
 |          memory_len           |                      [1]                      |   CPU    |         uint32         | **Optional**. The maximum time memory used in attention modules. Reduces the memory footprint but quality of generation might degrades. |
@@ -94,6 +97,15 @@ Optimization in GPT-j are similar to optimization in GPT, describing in the [gpt
 |  cum_log_probs   |             [batch_size, beam_width]             |   GPU    |   float   |          **Optional**. Cumulative log probability of generated sentences          |
 
 The `beam_width` value is set by the output shape directly. When the `beam_width` of `output_ids` is larger than 1, FT will use beam search to generate tokens; otherwise, FT will use topk or topp sampling. When the inputs of beam search and sampling is invalid, like beam width 1, top k 0, top p 0.0, FT will run greedy search automatically.
+
+### Inference Options
+
+We provide the environment variables to tune for specific usage.
+
+|        Name        |             Description                         |              Default                         |              Values accepted                         |
+| :----------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: |
+|  `FMHA_ENABLE`     |   enable the fused multi-head attention kernels (fp16 accumulation)   | disabled | `ON` = enable fmha, otherwise disabled |
+|  `CONTEXT_ATTENTION_BMM1_HALF_ACCUM`     |   use fp16 accumulation for the qk gemm, and only make a difference to unfused multi-head attention kernels | fp32 accumulation | `ON` = fp32 accumulation, otherwise fp16 accumulation |
 
 ### Supported features
 
@@ -123,13 +135,13 @@ The `beam_width` value is set by the output shape directly. When the `beam_width
 - Python: Only verify on python 3
 - PyTorch: Verify on 1.8.0, >= 1.5.0 should work.
 
-Recommend use nvcr image like `nvcr.io/nvidia/pytorch:22.07-py3`.
+Recommend use nvcr image like `nvcr.io/nvidia/pytorch:22.09-py3`.
 
 These components are readily available within the NGC Docker image below.
 
 Ensure you have the following components:
 - [NVIDIA Docker](https://github.com/NVIDIA/nvidia-docker) and NGC container are recommended
-- [NVIDIA Pascal](https://www.nvidia.com/en-us/data-center/pascal-gpu-architecture/) or [Volta](https://www.nvidia.com/en-us/data-center/volta-gpu-architecture/) or [Turing](https://www.nvidia.com/en-us/geforce/turing/) or [Ampere](https://www.nvidia.com/en-us/data-center/nvidia-ampere-gpu-architecture/) based GPU 
+- [NVIDIA Pascal](https://www.nvidia.com/en-us/data-center/pascal-gpu-architecture/) or [Volta](https://www.nvidia.com/en-us/data-center/volta-gpu-architecture/) or [Turing](https://www.nvidia.com/en-us/geforce/turing/) or [Ampere](https://www.nvidia.com/en-us/data-center/nvidia-ampere-gpu-architecture/) based GPU
 
 For more information about how to get started with NGC containers, see the following sections from the NVIDIA GPU Cloud Documentation and the Deep Learning Documentation:
 
@@ -141,10 +153,10 @@ For those unable to use the NGC container, to set up the required environment or
 
 ### Docker image
 
-* The model was built and tested with the use nvcr image `nvcr.io/nvidia/pytorch:22.07-py3`. e.g.
+* The model was built and tested with the use nvcr image `nvcr.io/nvidia/pytorch:22.09-py3`. e.g.
 
     ```bash
-    nvidia-docker run -ti --rm nvcr.io/nvidia/pytorch:22.07-py3 bash
+    nvidia-docker run -ti --shm-size 5g --rm nvcr.io/nvidia/pytorch:22.09-py3 bash
     ```
 
 ### Build project
@@ -175,7 +187,7 @@ By default, `-DSM` is set by 70, 75, 80 and 86. When users set more kinds of `-D
 
     ```bash
     cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release -DBUILD_MULTI_GPU=ON ..
-    make -j
+    make -j12
     ```
 
 ### Download the model
@@ -210,7 +222,7 @@ The script accepts the following arguments:
 
 ### Download tables
 
-* The vocabolary and merge tables are the same as for GPT
+* The vocabulary and merge tables are the same as for GPT
 
     ```bash
     wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json -P ../models

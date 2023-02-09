@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ add_subdirectory(utils)
 add_subdirectory(kernels)
 add_subdirectory(layers)
 add_subdirectory(models)
-if(BUILD_TF)
+if(BUILD_TF OR BUILD_TF2)
     add_subdirectory(tf_op)
 endif()
 if(BUILD_PYT)

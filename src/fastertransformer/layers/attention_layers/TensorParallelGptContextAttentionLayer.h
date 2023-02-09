@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ public:
                                            bool                                is_free_buffer_after_forward,
                                            bool                                is_qk_buf_float,
                                            bool                                sparse                   = false,
+                                           int                                 int8_mode                = 0,
                                            std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm   = nullptr,
                                            int                                 enable_custom_all_reduce = 0);
 
@@ -60,16 +61,14 @@ public:
                                            bool                                is_free_buffer_after_forward,
                                            bool                                is_qk_buf_float,
                                            bool                                sparse                   = false,
+                                           int                                 int8_mode                = 0,
                                            std::shared_ptr<AbstractCustomComm> custom_all_reduce_comm   = nullptr,
                                            int                                 enable_custom_all_reduce = 0);
 
     TensorParallelGptContextAttentionLayer(TensorParallelGptContextAttentionLayer<T> const& attention_layer);
 
-    ~TensorParallelGptContextAttentionLayer() = default;
-
-    void forward(std::vector<fastertransformer::Tensor>*       output_tensors,
-                 const std::vector<fastertransformer::Tensor>* input_tensors,
-                 const AttentionWeight<T>*                     attention_weights) override;
+    void
+    forward(TensorMap* output_tensors, TensorMap* input_tensors, const AttentionWeight<T>* attention_weights) override;
 };
 
 }  // namespace fastertransformer

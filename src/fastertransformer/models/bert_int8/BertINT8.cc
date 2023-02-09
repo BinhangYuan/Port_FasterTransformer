@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,9 +57,11 @@ BertINT8<T>::BertINT8(size_t           max_batch_size,
     if (sparse_ && int8_mode_ == 1) {
         throw std::runtime_error(std::string("[FT][ERROR] int8_mode 1 does not support sparsity \n"));
     }
-    if (int8_mode_ == 1 && max_seq_len_ > 384 && (max_seq_len_ % 32 != 0)) {
+    if (int8_mode_ == 1
+        && (attention_type == AttentionType::UNFUSED_MHA || attention_type == AttentionType::UNFUSED_PADDED_MHA)
+        && (max_seq_len_ % 32 != 0)) {
         throw std::runtime_error(std::string(
-            "[FT][ERROR] max_seq_len_ should be a multiple of 32 when int8_mode == 1 && max_seq_len_ > 384\n"));
+            "[FT][ERROR] max_seq_len_ should be a multiple of 32 when int8_mode == 1 && && (attention_type == AttentionType::UNFUSED_MHA || attention_type == AttentionType::UNFUSED_PADDED_MHA)\n"));
     }
     bert_layer_ = new BertLayerINT8<T>(max_batch_size_,
                                        max_seq_len_,
@@ -124,7 +126,7 @@ template<typename T>
 void BertINT8<T>::allocateBuffer()
 {
     if (is_allocate_buffer_ == false) {
-        token_num_ = (size_t*)allocator_->reMalloc(token_num_, sizeof(size_t) * 1, false);
+        h_pinned_token_num_ptr_ = (size_t*)allocator_->reMalloc(h_pinned_token_num_ptr_, sizeof(size_t), true, true);
         padding_offset_ =
             (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * max_batch_size_ * max_seq_len_, false);
         trt_mha_padding_offset_ =
@@ -145,7 +147,7 @@ template<typename T>
 void BertINT8<T>::freeBuffer()
 {
     if (is_allocate_buffer_ == true) {
-        allocator_->free((void**)(&token_num_));
+        allocator_->free((void**)(&h_pinned_token_num_ptr_), true);
         allocator_->free((void**)(&padding_offset_));
         allocator_->free((void**)(&trt_mha_padding_offset_));
 
@@ -173,7 +175,7 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
     FT_CHECK(input_tensors->at(1).shape.size() == 1);
     allocateBuffer();
 
-    const int* sequence_lengths = reinterpret_cast<const int*>(input_tensors->at(1).data);
+    const int* sequence_lengths = input_tensors->at(1).getPtr<const int>();
 
     size_t h_token_num;
     T*     bert_input_ptr;
@@ -185,8 +187,8 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
             invokeBuildEncoderAttentionMask(
                 attention_mask_, sequence_lengths, request_batch_size, request_seq_len, stream_);
             sync_check_cuda_error();
-            invokeGetPaddingOffset(&h_token_num,
-                                   token_num_,
+            invokeGetPaddingOffset(h_pinned_token_num_ptr_,
+                                   &h_token_num,
                                    padding_offset_,
                                    sequence_lengths,
                                    request_batch_size,
@@ -194,7 +196,7 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
                                    stream_);
 
             invokeRemovePadding(bert_in_buffer_,
-                                (const T*)input_tensors->at(0).data,
+                                input_tensors->at(0).getPtr<const T>(),
                                 padding_offset_,
                                 h_token_num,
                                 head_num_ * size_per_head_,
@@ -212,14 +214,14 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
                 attention_mask_, sequence_lengths, request_batch_size, request_seq_len, stream_);
             sync_check_cuda_error();
             h_token_num               = request_batch_size * request_seq_len;
-            bert_input_ptr            = (T*)input_tensors->at(0).data;
-            bert_output_ptr           = (T*)output_tensors->at(0).data;
+            bert_input_ptr            = input_tensors->at(0).getPtr<T>();
+            bert_output_ptr           = output_tensors->at(0).getPtr<T>();
             padding_offset_tensor_ptr = new Tensor(MEMORY_GPU, TYPE_INT32, std::vector<size_t>{0}, nullptr);
             break;
         }
         case AttentionType::FUSED_MHA: {
-            invokeGetPaddingOffset(&h_token_num,
-                                   token_num_,
+            invokeGetPaddingOffset(h_pinned_token_num_ptr_,
+                                   &h_token_num,
                                    padding_offset_,
                                    sequence_lengths,
                                    request_batch_size,
@@ -227,7 +229,7 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
                                    stream_);
 
             invokeRemovePadding(bert_in_buffer_,
-                                (const T*)input_tensors->at(0).data,
+                                input_tensors->at(0).getPtr<const T>(),
                                 padding_offset_,
                                 h_token_num,
                                 head_num_ * size_per_head_,
@@ -248,8 +250,8 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
                 trt_mha_padding_offset_, sequence_lengths, request_batch_size, request_seq_len, stream_);
             padding_offset_tensor_ptr = new Tensor(
                 MEMORY_GPU, TYPE_INT32, std::vector<size_t>{request_batch_size * 2 + 1}, trt_mha_padding_offset_);
-            bert_input_ptr  = (T*)input_tensors->at(0).data;
-            bert_output_ptr = (T*)output_tensors->at(0).data;
+            bert_input_ptr  = input_tensors->at(0).getPtr<T>();
+            bert_output_ptr = output_tensors->at(0).getPtr<T>();
             break;
         }
         default: {
@@ -284,7 +286,7 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
 
     switch (attention_type_) {
         case AttentionType::UNFUSED_MHA: {
-            invokeRebuildPadding((T*)output_tensors->at(0).data,
+            invokeRebuildPadding(output_tensors->at(0).getPtr<T>(),
                                  bert_out_buffer_,
                                  padding_offset_,
                                  h_token_num,
@@ -296,7 +298,7 @@ void BertINT8<T>::forward(std::vector<Tensor>*                       output_tens
             break;
         }
         case AttentionType::FUSED_MHA: {
-            invokeRebuildPadding((T*)output_tensors->at(0).data,
+            invokeRebuildPadding(output_tensors->at(0).getPtr<T>(),
                                  bert_out_buffer_,
                                  padding_offset_,
                                  h_token_num,

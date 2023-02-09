@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@
 
 #pragma once
 
-#include "src/fastertransformer/kernels/bfloat16_fallback_kenrels.cuh"
 #include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
+#include "src/fastertransformer/utils/cuda_fp8_utils.h"
+#include "src/fastertransformer/utils/cuda_type_utils.cuh"
 #include <stdint.h>
 
 using namespace fastertransformer;
@@ -57,6 +58,123 @@ struct bf16_8_t {
     __nv_bfloat162 w;
 };
 #endif
+
+#ifdef ENABLE_FP8
+using fp8_2_t = __nv_fp8x2_e4m3;
+using fp8_4_t = __nv_fp8x4_e4m3;
+struct fp8_8_t {
+    __nv_fp8_e4m3 x;
+    __nv_fp8_e4m3 y;
+    __nv_fp8_e4m3 z;
+    __nv_fp8_e4m3 w;
+};
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<typename T>
+struct num_elems;
+template<>
+struct num_elems<float> {
+    static constexpr int value = 1;
+};
+template<>
+struct num_elems<float2> {
+    static constexpr int value = 2;
+};
+template<>
+struct num_elems<float4> {
+    static constexpr int value = 4;
+};
+template<>
+struct num_elems<Float4_> {
+    static constexpr int value = 4;
+};
+template<>
+struct num_elems<Float8_> {
+    static constexpr int value = 8;
+};
+
+template<>
+struct num_elems<uint32_t> {
+    static constexpr int value = 2;
+};
+template<>
+struct num_elems<uint2> {
+    static constexpr int value = 4;
+};
+template<>
+struct num_elems<uint4> {
+    static constexpr int value = 8;
+};
+
+#ifdef ENABLE_BF16
+template<>
+struct num_elems<__nv_bfloat162> {
+    static constexpr int value = 2;
+};
+template<>
+struct num_elems<bf16_4_t> {
+    static constexpr int value = 4;
+};
+template<>
+struct num_elems<bf16_8_t> {
+    static constexpr int value = 8;
+};
+#endif
+
+#ifdef ENABLE_FP8
+template<>
+struct num_elems<__nv_fp8_e4m3> {
+    static constexpr int value = 1;
+};
+template<>
+struct num_elems<fp8_2_t> {
+    static constexpr int value = 2;
+};
+template<>
+struct num_elems<fp8_4_t> {
+    static constexpr int value = 4;
+};
+template<>
+struct num_elems<fp8_8_t> {
+    static constexpr int value = 8;
+};
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<typename T, int N>
+struct packed_type;
+template<typename T>
+struct packed_type<T, 1> {
+    using type = T;
+};
+template<>
+struct packed_type<int8_t, 2> {
+    using type = int16_t;
+};
+template<>
+struct packed_type<int8_t, 4> {
+    using type = int32_t;
+};
+template<>
+struct packed_type<int8_t, 8> {
+    using type = int64_t;
+};
+
+template<>
+struct packed_type<float, 2> {
+    using type = float2;
+};
+template<>
+struct packed_type<float, 4> {
+    using type = float4;
+};
+template<>
+struct packed_type<float, 8> {
+    using type = Float8_;
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -174,8 +292,8 @@ inline __device__ uint16_t float_to_half(float f)
         uint16_t u16[2];
     } tmp;
 #if 0 && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800  // Is it better?
-  float zero = 0.f;
-  asm volatile("cvt.rn.f16x2.f32 %0, %1, %2;\n" : "=r"(tmp.u32) : "f"(zero), "f"(f));
+    float zero = 0.f;
+    asm volatile("cvt.rn.f16x2.f32 %0, %1, %2;\n" : "=r"(tmp.u32) : "f"(zero), "f"(f));
 #else
     asm volatile("cvt.rn.f16.f32 %0, %1;\n" : "=h"(tmp.u16[0]) : "f"(f));
 #endif
@@ -230,6 +348,15 @@ inline __device__ float add(float a, uint16_t b)
 inline __device__ float add(float a, __nv_bfloat16 b)
 {
     return a + __bfloat162float(b);
+}
+#endif
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifdef ENABLE_FP8
+inline __device__ float add(float a, __nv_fp8_e4m3 b)
+{
+    return a + (float)(b);
 }
 #endif
 
@@ -320,6 +447,18 @@ inline __device__ float4 fma(float a, float4 b, float4 c)
     d.y = fma(a, b.y, c.y);
     d.z = fma(a, b.z, c.z);
     d.w = fma(a, b.w, c.w);
+    return d;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+inline __device__ float4 fma(float a, float4 b, Float4_ c)
+{
+    float4 d;
+    d.x = fma(a, b.x, c.x.x);
+    d.y = fma(a, b.y, c.x.y);
+    d.z = fma(a, b.z, c.y.x);
+    d.w = fma(a, b.w, c.y.y);
     return d;
 }
 
@@ -641,7 +780,10 @@ inline __device__ Float8_ fma(__nv_bfloat16 a, bf16_8_t b, Float8_ fc)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template<typename Acc, typename A, typename B>
-inline __device__ Acc mul(A a, B b);
+inline __device__ Acc mul(A a, B b)
+{
+    return Acc{};  // for compile
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -696,6 +838,19 @@ inline __device__ float4 mul(float a, float4 b)
     c.y = a * b.y;
     c.z = a * b.z;
     c.w = a * b.w;
+    return c;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<>
+inline __device__ Float8_ mul(float a, Float8_ b)
+{
+    Float8_ c;
+    c.x = mul<float2, float, float2>(a, b.x);
+    c.y = mul<float2, float, float2>(a, b.y);
+    c.z = mul<float2, float, float2>(a, b.z);
+    c.w = mul<float2, float, float2>(a, b.w);
     return c;
 }
 
@@ -785,6 +940,14 @@ inline __device__ float mul(uint16_t a, uint16_t b)
     float fa = half_to_float(a);
     float fb = half_to_float(b);
     return fa * fb;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<>
+inline __device__ float mul(uint16_t a, float b)
+{
+    return half_to_float(a) * b;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -942,6 +1105,14 @@ inline __device__ float mul(__nv_bfloat16 a, __nv_bfloat16 b)
     float fa = (float)a;
     float fb = (float)b;
     return fa * fb;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<>
+inline __device__ float mul(__nv_bfloat16 a, float b)
+{
+    return __bfloat162float(a) * b;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1564,6 +1735,15 @@ write_smem_transpose(const bf16_8_t& vec, __nv_bfloat16* smem, int transpose_idx
 }
 #endif
 
+#ifdef ENABLE_FP8
+template<>
+__device__ __inline__ void vec_from_smem_transpose(float4& vec, __nv_fp8_e4m3* smem, int transpose_idx, int smem_pitch)
+{
+    // TODO
+    printf("[ERROR] still no have implementation for vec_from_smem_transpose under __nv_fp8_e4m3 \n");
+}
+#endif  // ENABLE_FP8
+
 template<>
 __device__ __inline__ void write_smem_transpose(const uint4& vec, uint16_t* smem, int transpose_idx, int smem_pitch)
 {
@@ -1663,5 +1843,14 @@ __device__ __inline__ void write_smem_transpose(const float2& vec, float* smem, 
     smem[transpose_idx]              = vec.x;
     smem[smem_pitch + transpose_idx] = vec.y;
 }
+
+#ifdef ENABLE_FP8
+template<>
+__device__ __inline__ void
+write_smem_transpose(const float4& vec, __nv_fp8_e4m3* smem, int transpose_idx, int smem_pitch)
+{
+    printf("[ERROR] still no have implementation for vec_from_smem_transpose under __nv_fp8_e4m3 \n");
+}
+#endif  // ENABLE_FP8
 
 }  // namespace mmha

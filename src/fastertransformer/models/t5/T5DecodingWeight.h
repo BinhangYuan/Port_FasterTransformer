@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 #include "src/fastertransformer/kernels/gen_relative_pos_bias.h"
 #include "src/fastertransformer/kernels/layernorm_kernels.h"
 #include "src/fastertransformer/models/t5/T5DecoderLayerWeight.h"
+#include "src/fastertransformer/utils/IA3.h"
 #include "src/fastertransformer/utils/cuda_utils.h"
 #include "src/fastertransformer/utils/memory_utils.h"
 
@@ -28,21 +29,23 @@ template<typename T>
 struct T5DecodingWeight {
 
     T5DecodingWeight() = default;
-    T5DecodingWeight(const size_t                head_num,
-                     const size_t                size_per_head,
-                     const size_t                d_model,
-                     const size_t                inter_size,
-                     const size_t                vocab_size,
-                     const size_t                num_layer,
-                     const size_t                mem_d_model,
-                     const size_t                num_bucket_or_max_seq_len,
-                     const size_t                tensor_para_size,
-                     const size_t                tensor_para_rank,
-                     const size_t                pipeline_para_size,
-                     const size_t                pipeline_para_rank,
-                     const bool                  t5_with_bias_para            = false,
-                     const bool                  use_gated_activation_para    = false,
-                     const PositionEmbeddingType position_embedding_type_para = PositionEmbeddingType::relative);
+    T5DecodingWeight(size_t                head_num,
+                     size_t                size_per_head,
+                     size_t                d_model,
+                     size_t                inter_size,
+                     size_t                vocab_size,
+                     size_t                num_layer,
+                     size_t                mem_d_model,
+                     size_t                num_bucket_or_max_seq_len,
+                     size_t                tensor_para_size,
+                     size_t                tensor_para_rank,
+                     size_t                pipeline_para_size,
+                     size_t                pipeline_para_rank,
+                     bool                  t5_with_bias_para            = false,
+                     bool                  use_gated_activation_para    = false,
+                     PositionEmbeddingType position_embedding_type_para = PositionEmbeddingType::relative,
+                     size_t                num_ia3_tasks                = false,
+                     size_t                adapter_inter_size           = 0);
     ~T5DecodingWeight();
     T5DecodingWeight(const T5DecodingWeight& other);
     T5DecodingWeight& operator=(const T5DecodingWeight& other);
@@ -64,6 +67,11 @@ struct T5DecodingWeight {
                             bool                  use_gated_activation_para,
                             PositionEmbeddingType position_embedding_type_para);
 
+    inline size_t getNumIA3Tasks() const
+    {
+        return ia3_num_tasks_;
+    };
+
 private:
     void setWeightPtr();
     void mallocWeights();
@@ -84,7 +92,10 @@ private:
     size_t tensor_para_rank_;
     size_t pipeline_para_size_;
     size_t pipeline_para_rank_;
+    size_t ia3_num_tasks_;
+    size_t adapter_inter_size_;
     bool   is_maintain_buffer = false;
+    bool   shared_embed_      = false;
 
     int real_weights_num_;
 

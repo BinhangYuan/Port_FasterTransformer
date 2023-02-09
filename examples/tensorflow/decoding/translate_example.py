@@ -12,7 +12,7 @@ prefetching, token-based batching, gradients accumulation, beam search, etc.
 Currently, the beam search part is not easily customizable. This is expected to
 be improved for TensorFlow 2.0 which is eager first.
 
-# Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -408,7 +408,7 @@ def main():
                             'e.g., if you want to test op_decoder_beamsearch and op_decoding_sampling, 
                             then you need to use -time '15' ''')
     parser.add_argument('-diversity_rate', '--beam_search_diversity_rate', type=float, default=0.0, metavar='NUMBER',
-                        help='deviersity rate of beam search. default is 0. When diversity rate = 0, it is equivalent to the naive beams earch.')
+                        help='deviersity rate of beam search. default is 0. When diversity rate = 0, it is equivalent to the naive beam search.')
     parser.add_argument('-topk', '--sampling_topk', type=int, default=1, metavar='NUMBER',
                         help='Candidate (k) value of top k sampling in decoding. Default is 1.')
     parser.add_argument('-topp', '--sampling_topp', type=float, default=0.0, metavar='NUMBER',

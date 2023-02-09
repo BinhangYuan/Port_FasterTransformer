@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2022-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -302,7 +302,7 @@ void generate_swin_gemm_config(
 
             // for fp16 and bf16, we compare cublasLt
             if (i < 5 && data_type != FLOAT_DATATYPE) {
-                printf("***cublasLt Gemm Testing Beign***\n");
+                printf("***cublasLt Gemm Testing Begin***\n");
                 // Let try a fixed number of combinations
                 int                ALGO_COMBINATIONS = 5000;
                 customMatmulPerf_t perfResults[ALGO_COMBINATIONS];
@@ -332,7 +332,13 @@ void generate_swin_gemm_config(
                 }
                 else {
                     fprintf(fd,
-                            "%d %d %d %d %d ### %d %d %d %d %d -1 -1 -1 -1 -1 -1 -1 %f\n",
+                            "%d %d %d %d %d ### %d %d %d %d %d -1 -1 -1 -1 -1 -1 -1 "
+#if (CUBLAS_VER_MAJOR == 11 && CUBLAS_VER_MINOR == 11 && CUBLAS_VER_PATCH >= 3)
+                            "-1 -1 "
+#elif (CUBLAS_VER_MAJOR == 11 && CUBLAS_VER_MINOR == 11 && CUBLAS_VER_PATCH < 3)
+                            "-1 -1 -1 "
+#endif
+                            "%f\n",
                             batch_size,
                             seq_len,
                             head_num,
@@ -349,7 +355,13 @@ void generate_swin_gemm_config(
             }
             else {
                 fprintf(fd,
-                        "%d %d %d %d %d ### %d %d %d %d %d -1 -1 -1 -1 -1 -1 -1 %f\n",
+                        "%d %d %d %d %d ### %d %d %d %d %d -1 -1 -1 -1 -1 -1 -1 "
+#if (CUBLAS_VER_MAJOR == 11 && CUBLAS_VER_MINOR == 11 && CUBLAS_VER_PATCH >= 3)
+                        "-1 -1 "
+#elif (CUBLAS_VER_MAJOR == 11 && CUBLAS_VER_MINOR == 11 && CUBLAS_VER_PATCH < 3)
+                        "-1 -1 -1 "
+#endif
+                        "%f\n",
                         batch_size,
                         seq_len,
                         head_num,

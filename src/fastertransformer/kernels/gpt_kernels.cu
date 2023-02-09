@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "src/fastertransformer/utils/cuda_fp8_utils.h"
 #ifndef CUDART_VERSION
 #error CUDART_VERSION Undefined!
 #elif (CUDART_VERSION >= 11050)
@@ -423,6 +424,15 @@ template void invokeBuildDecoderAttentionMask(__nv_bfloat16* attention_mask,
                                               const int      max_prompt_length,
                                               cudaStream_t   stream);
 #endif
+#ifdef ENABLE_FP8
+template void invokeBuildDecoderAttentionMask(__nv_fp8_e4m3* attention_mask,
+                                              const int*     sequence_lengths,
+                                              const int*     prefix_prompt_lengths,
+                                              const int      batch_size,
+                                              const int      max_seq_len,
+                                              const int      max_prompt_length,
+                                              cudaStream_t   stream);
+#endif
 
 template<typename T>
 __launch_bounds__(1024, 1) __global__ void lookupHiddenStateOfLastToken(T*         from_tensor,
@@ -793,6 +803,7 @@ INSTANTIATE_INVOKE_COMPACT_INPUTS(float);
 #ifdef ENABLE_BF16
 INSTANTIATE_INVOKE_COMPACT_INPUTS(__nv_bfloat16);
 #endif
+#undef INSTANTIATE_INVOKE_COMPACT_INPUTS
 
 template<typename T>
 __global__ void uncompact_outputs(T*         uncompact_buffer,
@@ -845,6 +856,7 @@ INSTANTIATE_INVOKE_UNCOMPACT_OUTPUTS(float);
 #ifdef ENABLE_BF16
 INSTANTIATE_INVOKE_UNCOMPACT_OUTPUTS(__nv_bfloat16);
 #endif
+#undef INSTANTIATE_INVOKE_UNCOMPACT_OUTPUTS
 
 template<typename T>
 __global__ void uncompact_caches(T*         uncompact_k_cache,
@@ -948,6 +960,7 @@ INSTANTIATE_INVOKE_UNCOMPACT_CACHES(float);
 #ifdef ENABLE_BF16
 INSTANTIATE_INVOKE_UNCOMPACT_CACHES(__nv_bfloat16);
 #endif
+#undef INSTANTIATE_INVOKE_UNCOMPACT_CACHES
 
 template<bool PREFIX_PROMPT>
 __global__ void update_padding_count(int*       total_padding_count,
@@ -1051,5 +1064,48 @@ void invokeMaskPaddingTokens(bool*        masked_tokens,
                                                                        beam_width);
     }
 }
+
+template<typename T>
+__global__ void sum_length_dimension(
+    float* out_buf, const T* in_buf, const size_t batch_size, const size_t input_length, const size_t hidden_dim)
+{
+    const int bidx = blockIdx.x;
+
+    for (int hidx = threadIdx.x; hidx < hidden_dim; hidx += blockDim.x) {
+        float accum = 0.0f;
+        for (int step = 0; step < input_length; step++) {
+            accum += static_cast<float>(in_buf[(bidx * input_length + step) * hidden_dim + hidx]);
+        }
+        out_buf[bidx * hidden_dim + hidx] = accum;
+    }
+}
+
+template<typename T>
+void invokeSumLengthDimension(float*       out_buf,
+                              const T*     in_buf,
+                              const size_t batch_size,
+                              const size_t input_length,
+                              const size_t hidden_dim,
+                              cudaStream_t stream)
+{
+    dim3 gridSize(batch_size);
+    dim3 blockSize(256);
+
+    sum_length_dimension<<<gridSize, blockSize, 0, stream>>>(out_buf, in_buf, batch_size, input_length, hidden_dim);
+}
+
+#define INSTANTIATE_INVOKE_SUM_LENGTH_DIMENSION(T)                                                                     \
+    template void invokeSumLengthDimension(float*       out_buf,                                                       \
+                                           const T*     in_buf,                                                        \
+                                           const size_t batch_size,                                                    \
+                                           const size_t input_length,                                                  \
+                                           const size_t hidden_dim,                                                    \
+                                           cudaStream_t stream)
+INSTANTIATE_INVOKE_SUM_LENGTH_DIMENSION(half);
+INSTANTIATE_INVOKE_SUM_LENGTH_DIMENSION(float);
+#ifdef ENABLE_BF16
+INSTANTIATE_INVOKE_SUM_LENGTH_DIMENSION(__nv_bfloat16);
+#endif
+#undef INSTANTIATE_INVOKE_SUM_LENGTH_DIMENSION
 
 }  // namespace fastertransformer

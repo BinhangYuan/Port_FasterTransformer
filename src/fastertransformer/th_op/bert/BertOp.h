@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,9 +71,6 @@ public:
         std::string sp_config_fname = sparse ? "spgemm_config.in" : "";
         cublas_algo_map_            = new ft::cublasAlgoMap("gemm_config.in", sp_config_fname);
         cublas_wrapper_mutex_       = new std::mutex();
-
-
-        // #define LOAD_MODEL // Used for debug
 
 #ifdef LOAD_MODEL
         bert_weights = ft::BertWeight<T>(_head_num * _head_size,

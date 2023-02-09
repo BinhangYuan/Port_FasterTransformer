@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ add_library(Xlnet STATIC Xlnet.cc)
 set_property(TARGET Xlnet PROPERTY POSITION_INDEPENDENT_CODE  ON)
 set_property(TARGET Xlnet PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS  ON)
 target_link_libraries(Xlnet PUBLIC -lcudart xlnet_preprocess_kernels cublasMMWrapper 
-                        XlnetAttentionLayer FfnLayer layernorm_kernels tensor)
+                        XlnetAttentionLayer FfnLayer layernorm_kernels tensor
+                        cuda_utils logger)
 
 add_executable(xlnet_gemm xlnet_gemm.cc)
-target_link_libraries(xlnet_gemm PUBLIC -lcublas -lcublasLt -lcudart xlnet_gemm_func xlnet_gemm_func memory_utils tensor)
+target_link_libraries(xlnet_gemm PUBLIC -lcublas -lcublasLt -lcudart xlnet_gemm_func xlnet_gemm_func
+                      memory_utils tensor cuda_utils logger)

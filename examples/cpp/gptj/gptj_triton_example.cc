@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "src/fastertransformer/utils/custom_ar_comm.h"
 #include "src/fastertransformer/utils/mpi_utils.h"
 #include "src/fastertransformer/utils/nccl_utils.h"
+#include "src/fastertransformer/utils/nvtx_utils.h"
 #include "src/fastertransformer/utils/word_list.h"
 
 #include <memory>
@@ -37,6 +38,8 @@ struct RequestParam {
     float                  temperature;
     float                  len_penalty;
     float                  repetition_penalty;
+    float                  presence_penalty;
+    int                    min_length;
     unsigned long long int random_seed;
     int                    start_id;
     int                    end_id;
@@ -136,21 +139,14 @@ broadCastRequest(const std::vector<int>& v_start_ids,
                                 std::vector<size_t>{(size_t)request_batch_size},
                                 request_output_len_ptr}},
                 {"start_id",
-                 triton::Tensor{triton::MEMORY_CPU,
-                                triton::TYPE_INT32,
-                                {(size_t)request_batch_size},
-                                start_ids_ptr}},
+                 triton::Tensor{triton::MEMORY_CPU, triton::TYPE_INT32, {(size_t)request_batch_size}, start_ids_ptr}},
                 {"end_id",
-                 triton::Tensor{triton::MEMORY_CPU,
-                                triton::TYPE_INT32,
-                                {(size_t)request_batch_size},
-                                end_ids_ptr}}});
+                 triton::Tensor{triton::MEMORY_CPU, triton::TYPE_INT32, {(size_t)request_batch_size}, end_ids_ptr}}});
         if (!v_input_bad_words.empty()) {
-            input_tensors->insert({"bad_words_list",
-                                   triton::Tensor{triton::MEMORY_GPU,
-                                                  triton::TYPE_INT32,
-                                                  {2, v_input_bad_words.size() / 2},
-                                                  d_input_bad_words}});
+            input_tensors->insert(
+                {"bad_words_list",
+                 triton::Tensor{
+                     triton::MEMORY_GPU, triton::TYPE_INT32, {2, v_input_bad_words.size() / 2}, d_input_bad_words}});
         }
         request_list.push_back(input_tensors);
 
@@ -194,11 +190,26 @@ broadCastRequest(const std::vector<int>& v_start_ids,
         request_list[device_id]->insert(
             {"len_penalty",
              triton::Tensor{triton::MEMORY_CPU, triton::TYPE_FP32, std::vector<size_t>{1}, len_penalty_ptr}});
-        float* repetition_penalty_ptr = new float(param.repetition_penalty);
-        pointer_record->push_back(repetition_penalty_ptr);
+        if (param.repetition_penalty != 1.0f) {
+            float* repetition_penalty_ptr = new float(param.repetition_penalty);
+            pointer_record->push_back(repetition_penalty_ptr);
+            request_list[device_id]->insert(
+                {"repetition_penalty",
+                 triton::Tensor{
+                     triton::MEMORY_CPU, triton::TYPE_FP32, std::vector<size_t>{1}, repetition_penalty_ptr}});
+        }
+        if (param.presence_penalty != 0.0f) {
+            float* presence_penalty_ptr = new float(param.presence_penalty);
+            pointer_record->push_back(presence_penalty_ptr);
+            request_list[device_id]->insert(
+                {"presence_penalty",
+                 triton::Tensor{triton::MEMORY_CPU, triton::TYPE_FP32, std::vector<size_t>{1}, presence_penalty_ptr}});
+        }
+        int* min_length_ptr = new int(param.min_length);
+        pointer_record->push_back(min_length_ptr);
         request_list[device_id]->insert(
-            {"repetition_penalty",
-             triton::Tensor{triton::MEMORY_CPU, triton::TYPE_FP32, std::vector<size_t>{1}, repetition_penalty_ptr}});
+            {"min_length",
+             triton::Tensor{triton::MEMORY_CPU, triton::TYPE_INT32, std::vector<size_t>{1}, min_length_ptr}});
         unsigned long long int* random_seed_ptr = new unsigned long long int(param.random_seed);
         pointer_record->push_back(random_seed_ptr);
         request_list[device_id]->insert(
@@ -231,7 +242,7 @@ prepareRequest(std::string ini_name, const int node_id, const int gpu_count, std
     std::vector<int> v_start_ids;
     std::vector<int> v_start_lengths;
 
-    int max_input_len = 0;
+    size_t max_input_len = 0;
     ft::read_start_ids(request_batch_size,
                        &v_start_lengths,
                        &v_start_ids,
@@ -251,7 +262,9 @@ prepareRequest(std::string ini_name, const int node_id, const int gpu_count, std
     param.runtime_top_p              = reader.GetFloat("ft_instance_hyperparameter", "top_p");
     param.temperature                = reader.GetFloat("ft_instance_hyperparameter", "temperature");
     param.len_penalty                = reader.GetFloat("ft_instance_hyperparameter", "len_penalty");
-    param.repetition_penalty         = reader.GetFloat("ft_instance_hyperparameter", "repetition_penalty");
+    param.repetition_penalty         = reader.GetFloat("ft_instance_hyperparameter", "repetition_penalty", 1.0f);
+    param.presence_penalty           = reader.GetFloat("ft_instance_hyperparameter", "presence_penalty", 0.0f);
+    param.min_length                 = reader.GetInteger("ft_instance_hyperparameter", "min_length", 0);
     param.random_seed                = (unsigned long long int)0;
     param.start_id                   = start_id;
     param.end_id                     = end_id;
@@ -310,8 +323,8 @@ int main(int argc, char* argv[])
     std::shared_ptr<AbstractTransformerModel> model              = AbstractTransformerModel::createGptJModel(ini_name);
     int                                       tensor_para_size   = model->getTensorParaSize();
     int                                       pipeline_para_size = model->getPipelineParaSize();
-    ft::FT_CHECK_WITH_INFO(world_size == (tensor_para_size * pipeline_para_size),
-                           "World Size != Tensor Parallel Size * Pipeline Parallel Size !");
+    FT_CHECK_WITH_INFO(world_size == (tensor_para_size * pipeline_para_size),
+                       "World Size != Tensor Parallel Size * Pipeline Parallel Size !");
 
     std::cout << model->toString();
 

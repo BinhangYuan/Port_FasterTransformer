@@ -5,6 +5,7 @@
 - [GPT-NeoX](#gpt-neox)
   - [Table Of Contents](#table-of-contents)
   - [Introduction](#introduction)
+    - [Inference Options](#inference-options)
     - [Supported features](#supported-features)
   - [Setup](#setup)
     - [Requirements](#requirements)
@@ -21,6 +22,15 @@ For the time being, only the 20B parameter version has been tested.
 More details are listed in [gptj_guide.md](gptj_guide.md#introduction).
 
 Optimization in gpt-neox are similar to optimization in GPT, describing in the [gpt_guide.md](gpt_guide.md#optimization).
+
+### Inference Options
+
+We provide the environment variables to tune for specific usage.
+
+|        Name        |             Description                         |              Default                         |              Values accepted                         |
+| :----------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: |
+|  `FMHA_ENABLE`     |   enable the fused multi-head attention kernels (fp16 accumulation)   | disabled | `ON` = enable fmha, otherwise disabled |
+|  `CONTEXT_ATTENTION_BMM1_HALF_ACCUM`     |   use fp16 accumulation for the qk gemm, and only make a difference to unfused multi-head attention kernels | fp32 accumulation | `ON` = fp32 accumulation, otherwise fp16 accumulation |
 
 ### Supported features
 

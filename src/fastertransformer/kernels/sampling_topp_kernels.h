@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -142,5 +142,14 @@ int topPPerSegment(const TopKPerSegmentContext& context,
                    size_t&                      temp_storage_bytes,
                    cudaStream_t                 stream);
 }  // namespace segmented_topp_impl
+
+void invokeComputeToppDecay(float*         runtime_top_p,
+                            const float*   runtime_initial_top_p,
+                            const int*     output_ids,
+                            const float*   top_p_decay,
+                            const float*   top_p_min,
+                            const int32_t* top_p_reset_ids,
+                            const int      local_batch_size,
+                            cudaStream_t   stream);
 
 }  // namespace fastertransformer

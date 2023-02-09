@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,4 +15,4 @@ cmake_minimum_required(VERSION 3.8)
 
 add_executable(vit_int8_example vit_int8_example.cc)
 target_link_libraries(vit_int8_example PUBLIC ViTINT8 trt_fused_multi_head_attention vit_kernels
-  cublasMMWrapper nvtx_utils -lcublas -lcublasLt -lcudart -lcudnn -lm)
+  cublasMMWrapper nvtx_utils -lcublas -lcublasLt -lcudart "${CUDNN_LIBRARY_PATH}" -lm)

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2022-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,8 +44,8 @@ public:
     explicit TestFailureError(std::string name, std::string msg = "") {
         msg_ = fmtstr("TEST FAIL [%s] %s", name.c_str(), msg.c_str());
     }
-	const char* what () const throw () {
-    	return msg_.c_str();
+    const char* what () const throw () {
+        return msg_.c_str();
     }
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,18 @@
 #include <stdint.h>
 
 namespace fastertransformer {
+
+template<typename T>
+void invokeAddBiasResidual(T*           output,
+                           const T*     input,
+                           const T*     residual1,
+                           const T*     residual2,
+                           const T*     bias,
+                           const float* scale_inter,
+                           const float* scale_out,
+                           const int    m,
+                           const int    n,
+                           cudaStream_t stream);
 
 template<typename T>
 void invokeAddBiasResidual(

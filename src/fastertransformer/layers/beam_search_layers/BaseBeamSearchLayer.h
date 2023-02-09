@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "src/fastertransformer/kernels/penalty_types.h"
 #include "src/fastertransformer/layers/DynamicDecodeBaseLayer.h"
 
 namespace fastertransformer {
@@ -33,12 +34,9 @@ protected:
     size_t topk_softmax_workspace_size_;
     void*  topk_softmax_workspace_ = nullptr;
 
-    virtual void allocateBuffer()                                                            = 0;
-    virtual void allocateBuffer(size_t batch_size, size_t beam_width)                        = 0;
-    virtual void invokeSoftMax(std::vector<fastertransformer::Tensor>*       output_tensors,
-                               const std::vector<fastertransformer::Tensor>* input_tensors)  = 0;
-    virtual void invokeSoftMax(std::unordered_map<std::string, Tensor>*       output_tensors,
-                               const std::unordered_map<std::string, Tensor>* input_tensors) = 0;
+    virtual void allocateBuffer()                                                   = 0;
+    virtual void allocateBuffer(size_t batch_size, size_t beam_width)               = 0;
+    virtual void invokeSoftMax(TensorMap* output_tensors, TensorMap* input_tensors) = 0;
 
 public:
     BaseBeamSearchLayer(size_t           max_batch_size,
@@ -61,13 +59,12 @@ public:
 
     ~BaseBeamSearchLayer();
 
-    void setup(const size_t                                   batch_size,
-               const size_t                                   beam_width,
-               const std::unordered_map<std::string, Tensor>* runtime_args) override;
+    void setup(const size_t batch_size, const size_t beam_width, TensorMap* runtime_args) override;
     void forward(std::vector<fastertransformer::Tensor>*       output_tensors,
                  const std::vector<fastertransformer::Tensor>* input_tensors) override;
     void forward(std::unordered_map<std::string, Tensor>*       output_tensors,
                  const std::unordered_map<std::string, Tensor>* input_tensors) override;
+    void forward(TensorMap* output_tensors, TensorMap* input_tensors) override;
 };
 
 void update_indir_cache_kernelLauncher(int*         tgt_indir_cache,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,12 @@ typedef struct {
     int algoId, customOption, tile, splitK_val;
     int swizzle, reductionScheme, workspaceSize;
     // only used in cublasLt >= 11.0
-    int   stages;
+    int stages;
+#if (CUBLAS_VER_MAJOR == 11 && CUBLAS_VER_MINOR == 11 && CUBLAS_VER_PATCH >= 3)
+    uint16_t inner_shapeId, cluster_shapeId;
+#elif (CUBLAS_VER_MAJOR == 11 && CUBLAS_VER_MINOR == 11 && CUBLAS_VER_PATCH < 3)
+    uint16_t mma_shapeId, cga_shapeId, sche_mode;
+#endif
     float exec_time;
 } cublasLtMatmulAlgo_info;
 
@@ -59,6 +64,7 @@ private:
     std::map<std::string, int>                     sp_algo_map_;
 
 public:
+    cublasAlgoMap(){};
     explicit cublasAlgoMap(const std::string filename, const std::string sp_config_filename = "");
     cublasAlgoMap(const cublasAlgoMap& map);
     ~cublasAlgoMap();

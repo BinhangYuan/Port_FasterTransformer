@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2019-2023, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,8 +28,3 @@ add_library(TopPSamplingLayer STATIC TopPSamplingLayer.cu)
 set_property(TARGET TopPSamplingLayer PROPERTY POSITION_INDEPENDENT_CODE  ON)
 set_property(TARGET TopPSamplingLayer PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS  ON)
 target_link_libraries(TopPSamplingLayer PUBLIC -lcudart BaseSamplingLayer sampling_topk_kernels sampling_topp_kernels)
-
-add_library(TopKTopPSamplingLayer STATIC TopKTopPSamplingLayer.cu)
-set_property(TARGET TopKTopPSamplingLayer PROPERTY POSITION_INDEPENDENT_CODE  ON)
-set_property(TARGET TopKTopPSamplingLayer PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS  ON)
-target_link_libraries(TopKTopPSamplingLayer PUBLIC -lcudart BaseSamplingLayer sampling_topk_kernels sampling_topp_kernels)

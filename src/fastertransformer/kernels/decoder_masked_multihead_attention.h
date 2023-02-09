@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include "src/fastertransformer/layers/attention_layers_fp8/AttentionFP8Weight.h"
 #include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
+#include "src/fastertransformer/utils/cuda_fp8_utils.h"
 #include <cuda_fp16.h>
 #include <cuda_runtime_api.h>
 #include <stdint.h>
@@ -66,6 +68,11 @@ struct Multihead_attention_params_base {
     // The indirections to use for cache when beam sampling.
     const int* cache_indir = nullptr;
 
+    // scales
+    const float* query_weight_output_scale               = nullptr;
+    const float* attention_qk_scale                      = nullptr;
+    const float* attention_output_weight_input_scale_inv = nullptr;
+
     // Stride to handle the case when KQV is a single buffer
     int stride = 0;
 
@@ -82,6 +89,8 @@ struct Multihead_attention_params_base {
     // The per-head latent space reserved for rotary embeddings.
     int  rotary_embedding_dim = 0;
     bool neox_rotary_style    = false;
+    // The maximum length of input sentences.
+    int max_input_length = 0;
     // The current timestep. TODO(bhsueh) Check that do we only this param in cross attention?
     int timestep = 0;
     // The current timestep of each sentences (support different timestep for different sentences)
@@ -98,6 +107,16 @@ struct Multihead_attention_params_base {
 
     const T* relative_attention_bias        = nullptr;
     int      relative_attention_bias_stride = 0;
+    // The slope per head of linear position bias to attention score (H).
+    const T* linear_bias_slopes = nullptr;
+
+    const T*   ia3_key_weights   = nullptr;
+    const T*   ia3_value_weights = nullptr;
+    const int* ia3_tasks         = nullptr;
+
+    const float* qkv_scale_out       = nullptr;
+    const float* attention_out_scale = nullptr;
+    int          int8_mode           = 0;
 };
 
 template<typename T, bool CROSS_ATTENTION>
@@ -155,6 +174,10 @@ void masked_multihead_attention(const Masked_multihead_attention_params<float>& 
 void masked_multihead_attention(const Masked_multihead_attention_params<uint16_t>& params, const cudaStream_t& stream);
 #ifdef ENABLE_BF16
 void masked_multihead_attention(const Masked_multihead_attention_params<__nv_bfloat16>& params,
+                                const cudaStream_t&                                     stream);
+#endif
+#ifdef ENABLE_FP8
+void masked_multihead_attention(const Masked_multihead_attention_params<__nv_fp8_e4m3>& params,
                                 const cudaStream_t&                                     stream);
 #endif
 void cross_multihead_attention(const Cross_multihead_attention_params<float>& params, const cudaStream_t& stream);
