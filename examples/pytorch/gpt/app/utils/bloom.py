@@ -123,6 +123,7 @@ class Bloom(gpt.ParallelGPT):
                  tensor_para_size: int,
                  pipeline_para_size: int,
                  lib_path: str | Path,
+                 inference_data_type: str,
                  weights_data_type: str | np.dtype = np.float32,
                  layernorm_eps: float = 1e-5,
                  shared_contexts_ratio: float = 1.0,
@@ -131,6 +132,7 @@ class Bloom(gpt.ParallelGPT):
             head_num, size_per_head, vocab_size, start_id, end_id, layer_num,
             0, tensor_para_size,  pipeline_para_size,
             lib_path=lib_path,
+            inference_data_type=inference_data_type,
             layernorm_eps=layernorm_eps,
             # gpt_variant_params
             layernorm_type="pre_layernorm",

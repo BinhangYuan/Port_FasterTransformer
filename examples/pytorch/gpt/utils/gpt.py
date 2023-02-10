@@ -514,7 +514,6 @@ class GPT(nn.Module):
         # Prepare weights
         
         print(f"<GPT>:__init__: load weight starts.")
-        start_load_time = time.time()
         self.weights = GPTWeights(head_num, size_per_head, layer_num, vocab_size,
                                   max_seq_len, tensor_para_size, pipeline_para_size,
                                   weights_data_type=weights_data_type,
@@ -554,7 +553,6 @@ class GPT(nn.Module):
     
     def load_w_type(self, ckpt_path, infer_data_type):
         print(f"<GPT>:load: load weight starts.")
-        start_time = time.time()
         is_load = self.weights.load(ckpt_path, tensor_para_rank=self.tensor_para_rank,
                                     pipeline_para_rank=self.pipeline_para_rank)
         if infer_data_type == 'fp16':
@@ -564,8 +562,7 @@ class GPT(nn.Module):
         
         print("<GPT>:load: call self.cuda()")
         self.cuda()
-        end_time = time.time()
-        print(f"<GPT>:load: load weight ends. Loading takes {end_time - start_time} seconds.")
+        print(f"<GPT>:load: load weight ends.")
         return is_load
     
 

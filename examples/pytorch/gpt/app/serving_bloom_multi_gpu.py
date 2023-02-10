@@ -26,6 +26,7 @@ class FastBloomInference(FastInferenceInterface):
         args['worker_name'] = 'worker'+str(dist.get_rank())
         args['workers'] = dist.get_world_size()
         args['rank'] = dist.get_rank()
+        args['world_size'] = dist.get_world_size()
         
         super().__init__(model_name, args if args is not None else {})
         print("\n=============== Arguments ===============")
@@ -62,24 +63,24 @@ class FastBloomInference(FastInferenceInterface):
         self.end_id = self.tokenizer.eos_token_id
         vocab_size = hf_config['vocab_size']
         layernorm_eps = 1e-5
-        lib_path = '/workspace/Port_FasterTransformer/build/lib/libth_parallel_gpt.so'
+        lib_path = '/workspace/Port_FasterTransformer/build/lib/libth_transformer.so'
         ckpt_path = args['ckpt_path']
         self.tokenizer.pad_token = self.tokenizer.eos_token
         torch.manual_seed(0)
         with torch.no_grad():
             # Prepare model.
             self.bloom_model = Bloom(head_num, size_per_head, 
-                                   vocab_size, start_id, self.end_id, layer_num,
-                                   self.tensor_para_size, 
-                                   self.pipeline_para_size, 
-                                   lib_path,
-                                   weights_data_type=np.float16,
-                                   layernorm_eps=layernorm_eps,
-                                   int8_mode=0)
+                                    vocab_size, start_id, self.end_id, layer_num,
+                                    self.tensor_para_size, 
+                                    self.pipeline_para_size, 
+                                    lib_path,
+                                    inference_data_type="fp16",
+                                    weights_data_type=np.float16,
+                                    layernorm_eps=layernorm_eps,
+                                    int8_mode=0)
             if not self.bloom_model.load_w_type(ckpt_path=ckpt_path, infer_data_type='fp16'):
                 print("[WARNING] Checkpoint file not found. Model loading is skipped.")
                
-                
         print(f"<FastBloomInference.__init__> rank {dist.get_rank()} initialization done")
 
     def _sync_task_info(self):
@@ -162,9 +163,12 @@ class FastBloomInference(FastInferenceInterface):
                                     self.task_info["temperature"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
                                     self.task_info["len_penalty"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
                                     self.task_info["repetition_penalty"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
-                                    self.random_seed_tensor,
-                                    self.task_info["return_output_length"],
-                                    self.task_info["return_cum_log_probs"])
+                                    presence_penalty = None,
+                                    min_length = None,
+                                    random_seed = self.random_seed_tensor,
+                                    bad_words_list = None,
+                                    return_output_length = self.task_info["return_output_length"],
+                                    return_cum_log_probs = self.task_info["return_cum_log_probs"])
             # only a thread (rank 0) gets the output, while the others are supposed to return None.
             time_elapsed = timeit.default_timer() - time
         print("[INFO] Bloom time costs: {:.2f} ms. <rank-{}>".format(time_elapsed * 1000, dist.get_rank()))
