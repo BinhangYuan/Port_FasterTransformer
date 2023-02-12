@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import time
 import argparse
 import dataclasses
 import os
@@ -176,7 +176,7 @@ class GPTWeights:
             self.w.extend([torch.zeros(global_hidden_units, dtype=str_type_map[
                 self.inference_data_type])] * layer_num)   # adaptor2_bias2
 
-        # Initialization
+        # Initialization Fuck, this is silly, don't do this. 
         # self._map(lambda w: torch.nn.init.normal_(w, mean=0., std=1.))
 
         if (self.int8_mode != 0):
@@ -387,14 +387,11 @@ class GPTWeights:
 
         # Reshape
         try:
-            total_size = 0
             for i in range(len(w)):
                 if w[i].nelement() == self.w[i].nelement():
                     self.w[i] = w[i].reshape(self.w[i].shape)
-                    total_size += (w[i].nelement() * w[i].element_size())
                 else:
                     self.w[i] = w[i]
-            # print(f"Weight type: {self.weights_data_type}, Total_para_size: {total_size/1024/1024/1024} GB.")
 
         except RuntimeError:
             raise RuntimeError(
@@ -511,9 +508,9 @@ class GPT(nn.Module):
         torch.classes.load_library(os.path.abspath(lib_path))
         print(f"<GPT>:__init__: load lib ends.")
 
-        # Prepare weights
-        
         print(f"<GPT>:__init__: load weight starts.")
+        start_load_time = time.time()
+        # Prepare weights
         self.weights = GPTWeights(head_num, size_per_head, layer_num, vocab_size,
                                   max_seq_len, tensor_para_size, pipeline_para_size,
                                   weights_data_type=weights_data_type,
@@ -526,11 +523,12 @@ class GPT(nn.Module):
                                   adapter_inter_size=self.adapter_inter_size,
                                   int8_mode=int8_mode,
                                   inter_size=inter_size)
+        end_load_time = time.time()
+        print(f"<GPT>:__init__: load weight ends. Loading takes {end_load_time - start_load_time} seconds.")
 
         # Prepare for tensor/pipeline parallel
         try:
-            if not dist.is_initialized():
-                dist.init_process_group(backend='mpi')
+            dist.init_process_group(backend='mpi')
         except:
             print("[INFO] WARNING: Have initialized the process group")
         self.rank = dist.get_rank()
@@ -539,40 +537,22 @@ class GPT(nn.Module):
         torch.cuda.set_device(self.device)
 
         world_size = dist.get_world_size()
-        assert world_size == tensor_para_size * pipeline_para_size, f"tensor_para_size({tensor_para_size}) * pipeline_para_size({pipeline_para_size}) must be equal to world_size({world_size})."
+        assert world_size == tensor_para_size * pipeline_para_size, "tensor_para_size * pipeline_para_size must be equal to world_size."
 
         self.tensor_para_rank = self.rank % self.tensor_para_size
         self.pipeline_para_rank = self.rank // self.tensor_para_size
 
     def load(self, ckpt_path):
+        print(f"<GPT>:load: load weight starts.")
+        start_time = time.time()
         is_load = self.weights.load(ckpt_path, tp_rank=self.tensor_para_rank,
                                     pipeline_para_rank=self.pipeline_para_rank)
-        self.cuda()
-        torch.cuda.empty_cache()  # clean cache for model weight preprocessing
-        return is_load
-    
-    def load_w_type(self, ckpt_path, infer_data_type):
-        print(f"<GPT>:load: load weight starts.")
-        is_load = self.weights.load(ckpt_path, tensor_para_rank=self.tensor_para_rank,
-                                    pipeline_para_rank=self.pipeline_para_rank)
-        if infer_data_type == 'fp16':
-            self.weights._map(lambda w: w.half())
-        elif infer_data_type == 'bfp16':
-            self.weights._map(lambda w: w.bfloat16())
-        
         print("<GPT>:load: call self.cuda()")
         self.cuda()
-        print(f"<GPT>:load: load weight ends.")
+        torch.cuda.empty_cache()  # clean cache for model weight preprocessing
+        end_time = time.time()
+        print(f"<GPT>:load: load weight ends. Loading takes {end_time - start_time} seconds.")
         return is_load
-    
-
-    def half(self):
-        self.weights._map(lambda w: w.half())
-        self.cuda()
-
-    def bfloat16(self):
-        self.weights._map(lambda w: w.bfloat16())
-        self.cuda()
 
     def sparse(self):
         if not self.use_sparse_gemm:

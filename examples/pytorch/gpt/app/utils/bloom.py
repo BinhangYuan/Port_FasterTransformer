@@ -124,7 +124,7 @@ class Bloom(gpt.ParallelGPT):
                  pipeline_para_size: int,
                  lib_path: str | Path,
                  inference_data_type: str,
-                 weights_data_type: str | np.dtype = np.float32,
+                 weights_data_type: str | np.dtype = np.float16,
                  layernorm_eps: float = 1e-5,
                  shared_contexts_ratio: float = 1.0,
                  int8_mode: int = 0):

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #include "src/fastertransformer/th_op/multi_gpu_gpt/ParallelGptOp.h"
 #include "src/fastertransformer/th_op/multi_gpu_gpt/WeightTransposeCalibrateQuantizeOp.h"
 
@@ -152,6 +151,11 @@ std::vector<th::Tensor> ParallelGptOp::forward(th::Tensor               input_id
                                                th::optional<th::Tensor> bad_words_list_opt,
                                                th::optional<int64_t>    return_cum_log_probs_opt)
 {
+
+#ifdef _DEBUG_PRINT_BLOOM 
+        std::cout << "ParallelGptOp.forward: enter. " << std::endl;
+#endif
+
     CHECK_TH_CUDA(input_ids);
     CHECK_CONTIGUOUS(input_ids);
     TORCH_CHECK(input_ids.dtype() == torch::kInt32, "input_ids dtype should be int32");
@@ -178,6 +182,10 @@ std::vector<th::Tensor> ParallelGptOp::forward(th::Tensor               input_id
         torch::empty({batch_size, beam_width}, torch::dtype(torch::kInt32).device(torch::kCUDA).requires_grad(false));
     th::Tensor cum_log_probs =
         torch::empty({batch_size, beam_width}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(false));
+
+#ifdef _DEBUG_PRINT_BLOOM 
+        std::cout << "ParallelGptOp.forward: to call ftgpt->forward. " << std::endl;
+#endif
 
     ftgpt->forward(input_ids,
                    input_lengths,

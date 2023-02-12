@@ -63,7 +63,7 @@ class FastBloomInference(FastInferenceInterface):
         self.end_id = self.tokenizer.eos_token_id
         vocab_size = hf_config['vocab_size']
         layernorm_eps = 1e-5
-        lib_path = '/workspace/Port_FasterTransformer/build/lib/libth_transformer.so'
+        lib_path = '/workspace/FasterTransformer/build/lib/libth_transformer.so'
         ckpt_path = args['ckpt_path']
         self.tokenizer.pad_token = self.tokenizer.eos_token
         torch.manual_seed(0)
@@ -219,7 +219,7 @@ if __name__ == "__main__":
                         help='worker name for together coordinator.')
     parser.add_argument('--hf_model_name', type=str, default='bigscience/bloom',
                         help='hugging face model name (used to load config).')
-    parser.add_argument('--ckpt_path', type=str, default='/workspace/Port_FasterTransformer/build/model/bloom-tp8/8-gpu',
+    parser.add_argument('--ckpt_path', type=str, default='/workspace/FasterTransformer/build/model/bloom-tp8/8-gpu',
                         help='path to the checkpoint file.')
     parser.add_argument('--tensor_para_size', type=int, default=8,
                         help='tensor parallel size')

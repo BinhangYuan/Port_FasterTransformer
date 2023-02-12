@@ -569,6 +569,10 @@ void ParallelGpt<T>::forward(std::unordered_map<std::string, Tensor>*       outp
                              const std::unordered_map<std::string, Tensor>* input_tensors,
                              const ParallelGptWeight<T>*                    gpt_weights)
 {
+
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "ParallelGpt<T>::forward: enter. " << std::endl;
+#endif
     // input_tensors:
     //      input_ids [batch_size, max_input_length]
     //      input_lengths [batch_size]
@@ -715,6 +719,10 @@ void ParallelGpt<T>::forward(std::unordered_map<std::string, Tensor>*       outp
     bool use_loaded_p_prompt_embedding = has_p_prompt_tuning_ && !use_request_p_prompt_embedding;
     has_prefix_soft_prompt_            = request_prompt_type == PromptLearningType::soft_prompt;
 
+#ifdef _DEBUG_PRINT_BLOOM
+    std::cout << "ParallelGpt<T>::forward: before soft prompt. " << std::endl;
+#endif
+
     // NOTE: soft prompt
     FT_CHECK_WITH_INFO(!(has_prefix_soft_prompt_ && continue_gen),
                        "Interactive Generations cannot work with prefix_soft_prompt !");
@@ -795,6 +803,10 @@ void ParallelGpt<T>::forward(std::unordered_map<std::string, Tensor>*       outp
     }
     setSeqLimitLen(seq_limit_len_, input_tensors->at("output_seq_len"), limit_len_offset, batch_size);
     POP_RANGE;
+
+#ifdef _DEBUG_PRINT_BLOOM
+    std::cout << "ParallelGpt<T>::forward: buffer allocation. " << std::endl;
+#endif
 
     const DataType       data_type      = getTensorType<T>();
     const cudaDataType_t gemm_data_type = getCudaDataType<T>();
@@ -1178,6 +1190,10 @@ void ParallelGpt<T>::forward(std::unordered_map<std::string, Tensor>*       outp
                             beam_width,
                             stream_);
     POP_RANGE;
+
+#ifdef _DEBUG_PRINT_BLOOM
+    std::cout << "ParallelGpt<T>::forward: mask padding tokens. " << std::endl;
+#endif
 
     // If continue, we restart from initial_step because last token hasn't been processed in decoder
     const int step_start = continue_gen ? initial_step : max_input_length;

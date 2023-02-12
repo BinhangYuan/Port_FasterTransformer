@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#define _DEBUG_PRINT_BLOOM
 #include "src/fastertransformer/models/multi_gpu_gpt/ParallelGpt.h"
 #include "src/fastertransformer/th_op/th_utils.h"
 #include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
@@ -95,6 +95,10 @@ public:
 
         ftNcclInitialize(tensor_para_, pipeline_para_, tensor_para_size, pipeline_para_size);
 
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.FTGpt: ftNcclInitialize done. " << std::endl;
+#endif
+
         gpt_weights_.resizeLayer(layer_num_);
         for (int i = 0; i < (int)layer_num_; i++) {
             gpt_weights_.decoder_layer_weights[i]->pre_layernorm_weights.gamma =
@@ -156,6 +160,9 @@ public:
             }
         }
 
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.FTGpt: layers loaded. " << std::endl;
+#endif
         size_t weight_offset = 0;
         if (gpt_variant_params_.has_pre_decoder_layernorm) {
             gpt_weights_.pre_decoder_layernorm.gamma = get_ptr<T>(weights_[12 * layer_num_ + 0 - weight_offset]);
@@ -250,7 +257,9 @@ public:
                 }
             }
         }
-
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.FTGpt: compelete loaded. " << std::endl;
+#endif
         int device_id = 0;
         ft::check_cuda_error(cudaGetDevice(&device_id));
         ft::check_cuda_error(cudaGetDeviceProperties(&prop_, device_id));
@@ -285,10 +294,18 @@ public:
                  th::optional<th::Tensor> bad_words_list_opt,
                  th::optional<int64_t>    return_cum_log_probs_opt) override
     {
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.forward: enter. " << std::endl;
+#endif
         int  return_cum_log_probs   = return_cum_log_probs_opt.has_value() ? (int)return_cum_log_probs_opt.value() : 0;
         auto stream                 = at::cuda::getCurrentCUDAStream().stream();
         cublasHandle_t cublasHandle = at::cuda::getCurrentCUDABlasHandle();
         cublasSetStream(cublasHandle, stream);
+
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.forward: set cublasSetStream done. " << std::endl;
+#endif
+
         ft::Allocator<ft::AllocatorType::TH> allocator      = ft::Allocator<ft::AllocatorType::TH>();
         ft::cublasMMWrapper                  cublas_wrapper = ft::cublasMMWrapper(
             cublasHandle, cublasltHandle_, stream, cublas_algo_map_, cublas_wrapper_mutex_, &allocator);
@@ -317,6 +334,10 @@ public:
                                     true,              // is_fuse
                                     false,             // with_relative_position_bias
                                     true);             // causal_mask
+
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.forward: to call ft::ParallelGpt<T>. " << std::endl;
+#endif
 
         ft::ParallelGpt<T> gpt = ft::ParallelGpt<T>(request_batch_size,
                                                     total_output_len,
@@ -356,6 +377,9 @@ public:
                                                     0,
                                                     shared_contexts_ratio_);
 
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.forward: ft::ParallelGpt<T> gpt constructed. " << std::endl;
+#endif
         std::vector<uint32_t> output_seq_len(request_batch_size, total_output_len);
 
         std::unordered_map<std::string, ft::Tensor> input_tensors = std::unordered_map<std::string, ft::Tensor>{
@@ -442,6 +466,9 @@ public:
                                               get_ptr<float>(cum_log_probs)}});
         }
 
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.forward: to call gpt.forward. " << std::endl;
+#endif
         try {
             gpt.forward(&output_tensors, &input_tensors, &gpt_weights_);
         }
@@ -457,6 +484,9 @@ public:
             FT_LOG_ERROR("Unknown error");
             ft::FT_CHECK(false);
         }
+#ifdef _DEBUG_PRINT_BLOOM
+        std::cout << "FTGpt.forward: gpt.forward is done. " << std::endl;
+#endif     
     }
 
 private:

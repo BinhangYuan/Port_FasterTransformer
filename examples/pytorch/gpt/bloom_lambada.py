@@ -138,7 +138,7 @@ def get_args():
         help='A file path of a pretrained tokenizer or a checkpoint directory '
              'of HF pretrained model.')
     group.add_argument(
-        '--lib-path', type=str, metavar='PATH', default='./lib/libth_transformer.so',
+        '--lib-path', type=str, metavar='PATH', default='/workspace/FasterTransformer/build/lib/libth_transformer.so',
         help='A FT library path to load `FasterTransformer.ParallelGptOp`')
     group.add_argument(
         '--test-hf', action='store_true',
@@ -187,8 +187,7 @@ def get_model_and_tokenizer(args: argparse.Namespace):
             args.tokenizer_path, padding_side=padding_side)
     else:
         # Directly load from a tokenizer json file.
-        tokenizer = transformers.BloomTokenizerFast(
-            tokenizer_file=tokenizer_path, padding_side=padding_side)
+        tokenizer = transformers.BloomTokenizerFast.from_pretrained("bigscience/bloom")
     # For open-ended generation, the pad token is sometimes replaced by the
     # eos token but the Bloom of HF requires as it is to correctly generate.
 

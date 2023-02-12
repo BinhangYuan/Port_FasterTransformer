@@ -455,7 +455,7 @@ class GPT(nn.Module):
                  tensor_para_size: int, 
                  pipeline_para_size: int,
                  lib_path: typing.Union[str, pathlib.Path],
-                 inference_data_type: str,
+                 inference_data_type: str = "fp16",
                  inter_size: int = 0,
                  layernorm_eps: float = 1e-6,
                  layernorm_type: typing.Literal['pre_layernorm', 'post_layernorm'] = "pre_layernorm",
@@ -471,9 +471,11 @@ class GPT(nn.Module):
                  adapter_inter_size: int = 0,
                  use_attention_linear_bias: bool = False,
                  int8_mode: int = 0,
-                 weights_data_type: typing.Union[str, np.dtype] = np.float32,
+                 weights_data_type: typing.Union[str, np.dtype] = np.float16,
                  shared_contexts_ratio: float = 1.0):
         super().__init__()
+        self.inference_data_type = inference_data_type
+        
         self.head_num = head_num
         self.size_per_head = size_per_head
         self.vocab_size = vocab_size
@@ -545,6 +547,7 @@ class GPT(nn.Module):
         self.device_count = torch.cuda.device_count()
         self.device = self.rank % self.device_count
         torch.cuda.set_device(self.device)
+        print(f"<GPT>:__init__: self.device: {self.device}.")
 
         world_size = dist.get_world_size()
         assert world_size == tensor_para_size * pipeline_para_size, f"tensor_para_size({tensor_para_size}) * pipeline_para_size({pipeline_para_size}) must be equal to world_size({world_size})."
@@ -559,7 +562,7 @@ class GPT(nn.Module):
         is_load = self.weights.load(ckpt_path, tp_rank=self.tensor_para_rank,
                                     pipeline_para_rank=self.pipeline_para_rank)
         self.cuda()
-        torch.cuda.empty_cache()  # clean cache for model weight preprocessing
+        # torch.cuda.empty_cache()  # clean cache for model weight preprocessing
         return is_load
     
     def load_w_type(self, ckpt_path, infer_data_type):
@@ -567,10 +570,11 @@ class GPT(nn.Module):
         start_time = time.time()
         is_load = self.weights.load(ckpt_path, tp_rank=self.tensor_para_rank,
                                     pipeline_para_rank=self.pipeline_para_rank)
-        if infer_data_type == 'fp16':
-            self.weights._map(lambda w: w.half())
-        elif infer_data_type == 'bfp16':
-            self.weights._map(lambda w: w.bfloat16())
+        
+        #if infer_data_type == 'fp16':
+        #    self.weights._map(lambda w: w.half())
+        #elif infer_data_type == 'bfp16':
+        #    self.weights._map(lambda w: w.bfloat16())
         
         print("<GPT>:load: call self.cuda()")
         self.cuda()
@@ -642,7 +646,7 @@ class GPT(nn.Module):
         if not self.build_model:
             # for the cases we don't load model
             self.cuda()
-            torch.cuda.empty_cache()  # clean cache for model weight preprocessing
+            # torch.cuda.empty_cache()  # clean cache for model weight preprocessing
         print("<GPT.forward> after cuda()")
         input_len = start_ids.size(1)
         assert input_len > 0, "input len must be larger than zero. For an unconditional case, use start_id as the first token."
@@ -650,6 +654,24 @@ class GPT(nn.Module):
         # Inputs to device
         start_ids = start_ids.cuda(self.device)
         start_lengths = start_lengths.cuda(self.device)
+        
+        '''
+        top_k = top_k.cuda(self.device)
+        top_p = top_p.cuda(self.device)
+        beam_search_diversity_rate = beam_search_diversity_rate.cuda(self.device)
+        temperature = temperature.cuda(self.device)
+        len_penalty = len_penalty.cuda(self.device)
+        repetition_penalty = repetition_penalty.cuda(self.device)
+        random_seed = random_seed.cuda(self.device)
+        
+        top_p = top_p.to(str_type_map[self.inference_data_type])
+        beam_search_diversity_rate = beam_search_diversity_rate.to(str_type_map[self.inference_data_type])
+        temperature = temperature.to(str_type_map[self.inference_data_type])
+        len_penalty = len_penalty.to(str_type_map[self.inference_data_type])
+        repetition_penalty = repetition_penalty.to(str_type_map[self.inference_data_type])
+        random_seed = random_seed.to(str_type_map[self.inference_data_type])
+        '''
+        
         # outputs: output_ids, output_lengths, output_cum_log_probs (optional)
         print("<GPT.forward> call self.model.forward")
         outputs = self.model.forward(start_ids,

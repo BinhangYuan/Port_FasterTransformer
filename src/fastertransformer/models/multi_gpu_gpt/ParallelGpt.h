@@ -17,6 +17,8 @@
 
 #pragma once
 
+#define _DEBUG_PRINT_BLOOM
+
 #include <cstddef>
 #include <vector>
 
