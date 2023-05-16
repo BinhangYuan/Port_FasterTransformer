@@ -18,25 +18,27 @@ from utils.para_utils import *
 from transformers import AutoTokenizer, AutoConfig
 
 
+logging.setLevel(int(os.environ.get('LOG_LEVEL', logging.DEBUG)))
+
 class FastOPTInference(FastInferenceInterface):
     def __init__(self, model_name: str, args=None) -> None:
         try:
             if not dist.is_initialized():
                 dist.init_process_group(backend='mpi')
         except:
-            print("[INFO] WARNING: Have initialized the process group")
+            logging.debug("[INFO] WARNING: Have initialized the process group")
         
         args['worker_name'] = 'worker'+str(dist.get_rank())
         args['workers'] = dist.get_world_size()
         args['rank'] = dist.get_rank()
         
         super().__init__(model_name, args if args is not None else {})
-        print("\n=============== Arguments ===============")
-        print(args.keys())
-        print(args)
+        logging.debug("\n=============== Arguments ===============")
+        logging.debug(args.keys())
+        logging.debug(args)
         #for key in args.keys():
-        #    print("{}: {}".format(arg, getattr(args, arg)))
-        print("=========================================\n")
+        #    logging.debug("{}: {}".format(arg, getattr(args, arg)))
+        logging.debug("=========================================\n")
         self.tensor_para_size = args['tensor_para_size']
         self.pipeline_para_size = 1
         self.max_batch_size = args['max_batch_size']
@@ -87,13 +89,13 @@ class FastOPTInference(FastInferenceInterface):
                                          layernorm_eps, layernorm_type, activation_type, has_post_decoder_layernorm,
                                          int8_mode=0, weights_data_type='fp16')
             if not self.opt_model.load_w_type(ckpt_path=ckpt_path, infer_data_type='fp16'):
-                print("[WARNING] Checkpoint file not found. Model loading is skipped.")
+                logging.debug("[WARNING] Checkpoint file not found. Model loading is skipped.")
                
                 
-        print(f"<FastOPTInference.__init__> rank {dist.get_rank()} initialization done")
+        logging.debug(f"<FastOPTInference.__init__> rank {dist.get_rank()} initialization done")
 
     def _sync_task_info(self):
-        print(f"<FastOPTInference._sync_task_info> enter rank-<{dist.get_rank()}>")
+        logging.debug(f"<FastOPTInference._sync_task_info> enter rank-<{dist.get_rank()}>")
         dist.barrier()
         if dist.get_rank() == 0:
             dist.broadcast_object_list([self.task_info], src=0)
@@ -102,10 +104,10 @@ class FastOPTInference(FastInferenceInterface):
             torch.distributed.broadcast_object_list(info, src=0)
             self.task_info = info[0]
         dist.barrier()
-        print(f"<FastOPTInference._sync_task_info> leave rank-<{dist.get_rank()}, task_info:{self.task_info}>")
+        logging.debug(f"<FastOPTInference._sync_task_info> leave rank-<{dist.get_rank()}, task_info:{self.task_info}>")
         
     def dispatch_request(self, args, env) -> Dict:
-        print(f"Rank {dist.get_rank()} get {args}")
+        logging.debug(f"Rank {dist.get_rank()} get {args}")
         args = args[0]
         args = {k: v for k, v in args.items() if v is not None}
         # Inputs
@@ -122,6 +124,7 @@ class FastOPTInference(FastInferenceInterface):
         self.task_info["stream_tokens"] = args.get("stream_tokens", False)
         self.task_info["return_cum_log_probs"] = args.get("return_cum_log_probs", 0)
         self.task_info["return_output_length"] = args.get("return_output_length", 0)
+        self.task_info["stream_tokens"] = args.get("stream_tokens", False)
         
         if len(self.task_info["prompt_seqs"][0]) == 0 or self.task_info["output_len"] == 0:
             inferenece_result = []
@@ -140,16 +143,16 @@ class FastOPTInference(FastInferenceInterface):
                 "choices": inferenece_result[0]['choices'],
                 "raw_compute_time": 0.0
             }
-            print(f"<FastGPTJInference.dispatch_request> (not FT runs, 0 input or output) return: {result}")
+            logging.debug(f"<FastGPTJInference.dispatch_request> (not FT runs, 0 input or output) return: {result}")
             return result
         else:
             self._sync_task_info()
             result = self._run_inference()
-            print(f"<FastOPTInference.dispatch_request> return: {result}")
+            prilogging.debugnt(f"<FastOPTInference.dispatch_request> return: {result}")
             return result
 
     def _run_inference(self):
-        print(f"<FastOPTInference._run_inference> enter rank-<{dist.get_rank()}>")
+        logging.debug(f"<FastOPTInference._run_inference> enter rank-<{dist.get_rank()}>")
         
         with torch.no_grad():
             contexts = self.task_info["prompt_seqs"]
@@ -158,7 +161,7 @@ class FastOPTInference(FastInferenceInterface):
             
             start_ids = pad_sequence(start_ids, batch_first=True, padding_value=self.end_id)
             start_lengths = torch.IntTensor(start_lengths)
-            print(f"start_ids: length ({start_ids.shape[0]}) ids: {start_ids}")
+            logging.debug(f"start_ids: length ({start_ids.shape[0]}) ids: {start_ids}")
             
             time = timeit.default_timer()
             max_batch_size = self.max_batch_size
@@ -174,17 +177,19 @@ class FastOPTInference(FastInferenceInterface):
                                     self.task_info["repetition_penalty"] * torch.ones(size=[max_batch_size], dtype=torch.float32),
                                     self.random_seed_tensor,
                                     self.task_info["return_output_length"],
-                                    self.task_info["return_cum_log_probs"])
+                                    self.task_info["return_cum_log_probs"],
+                                    self.served,	
+                                    self.stream_tokens_pipe_w if self.task_info["stream_tokens"] else -1)
             # only a thread (rank 0) gets the output, while the others are supposed to return None.
             time_elapsed = timeit.default_timer() - time
-        print("[INFO] OPT time costs: {:.2f} ms. <rank-{}>".format(time_elapsed * 1000, dist.get_rank()))
+        logging.debug("[INFO] OPT time costs: {:.2f} ms. <rank-{}>".format(time_elapsed * 1000, dist.get_rank()))
         
         if dist.get_rank() == 0:
             assert tokens_batch is not None
         
             if self.task_info["return_cum_log_probs"] > 0:
                 tokens_batch, _, cum_log_probs = tokens_batch
-                print('[INFO] Log probs of sentences:', cum_log_probs)
+                logging.debug('[INFO] Log probs of sentences:', cum_log_probs)
 
             inferenece_result = []
             tokens_batch = tokens_batch.cpu().numpy()
@@ -194,7 +199,7 @@ class FastOPTInference(FastInferenceInterface):
                 for beam_id in range(self.task_info["beam_width"]):
                     token = tokens[beam_id][start_lengths[i]:]  # exclude context input from the output
                     output = self.tokenizer.decode(token)
-                    print(f"[INFO] batch {i}, beam {beam_id}: \n[Context]\n{context}\n\n[Output]\n{output}\n")
+                    logging.debug(f"[INFO] batch {i}, beam {beam_id}: \n[Context]\n{context}\n\n[Output]\n{output}\n")
                     choice = {
                         "text": post_processing_text(output, self.task_info["stop"]),
                         "index": beam_id,
@@ -252,7 +257,7 @@ if __name__ == "__main__":
         "group_name": args.group_name,
         "ckpt_path": args.ckpt_path,
         "tensor_para_size":args.tensor_para_size,
-        "stream_tokens_pipe": False,
+        "stream_tokens_pipe": True,
         "max_batch_size":1
     })
     fip.start()
