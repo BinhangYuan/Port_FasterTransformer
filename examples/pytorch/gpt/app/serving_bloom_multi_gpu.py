@@ -63,7 +63,7 @@ class FastBloomInference(FastInferenceInterface):
         self.end_id = self.tokenizer.eos_token_id
         vocab_size = hf_config['vocab_size']
         layernorm_eps = 1e-5
-        lib_path = '/workspace/FasterTransformer/build/lib/libth_transformer.so'
+        lib_path = '/workspace/Port_FasterTransformer/build/lib/libth_transformer.so'
         ckpt_path = args['ckpt_path']
         self.tokenizer.pad_token = self.tokenizer.eos_token
         torch.manual_seed(0)
