@@ -51,17 +51,34 @@ if [ "$MODEL_SHARDS" -gt 1 ]; then
   exit 0
 fi
 
+if [[ "$FROM_HF" == "True" ]]; then
+  echo Converting model from HuggingFace format...
+  case ${MODEL_TYPE-gptj} in
+    gpt)
+     env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gpt/utils/huggingface_gpt_convert.py -i $MODEL -o /home/user/.together/models/$MODEL -i_g $MODEL_SHARDS -weight_data_type fp16 -m_n $MODEL' &
+    ;;
+    gptneox)
+     env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gptneox/app/utils/huggingface_gptneox_convert.py -i $MODEL -o /home/user/.together/models/$MODEL -i_g $MODEL_SHARDS -weight_data_type fp16 -m_n $MODEL'
+    ;;
+    *)
+      echo Unknown MODEL_TYPE
+      exit 1
+    ;;
+  esac
+  exit 0
+fi
+
 count=0
 for i in ${DEVICES//,/$IFS}; do
   case ${MODEL_TYPE-gptj} in
     gpt)
-      env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gpt/app/serving_opt_single_gpu.py --hf_model_name facebook/$MODEL --ckpt_path /home/user/.together/models/$MODEL' &
+      env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gpt/app/serving_opt_single_gpu.py --hf_model_name facebook/$MODEL --ckpt_path /home/user/.together/models/${MODEL}/${MODEL_SHARDS}_gpu' &
     ;;
     gptj)
       env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gptj/app/serving.py --ckpt_path /home/user/.together/models/$MODEL' &
     ;;
     gptneox)
-      env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gptneox/app/serving_single_gpu.py --ckpt_path /home/user/.together/models/$MODEL' &
+      env DEVICE=${DEVICE-cuda:$i} GROUP=${GROUP-group$i} /bin/bash -c 'python examples/pytorch/gptneox/app/serving_single_gpu.py --ckpt_path /home/user/.together/models/${MODEL}/${MODEL_SHARDS}_gpu' &
     ;;
     *)
       echo Unknown MODEL_TYPE
